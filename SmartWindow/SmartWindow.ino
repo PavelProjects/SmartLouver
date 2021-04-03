@@ -90,42 +90,9 @@ void setup(void){
   servo_left.attach(SERVO_LEFT_PIN);
   
   delay(1000);
-  
-  networkName = readFromEEPROM(NETWORK_NAME_OFFSET);
-  networkPassword = readFromEEPROM(NETWORK_PASSWORD_OFFSET);
 
-  if(networkName.length() > 0){
-    int c = 0;
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(networkName, networkPassword);
-    Serial.print("Connecting to ");
-    Serial.print(networkName);
-    Serial.print(" with password ");
-    Serial.println(networkPassword);
-    while (c < CONNECT_TRIES && WiFi.status() != WL_CONNECTED) {
-      blink(2);
-      Serial.print(".");
-      c++;
-    }
-    if(WiFi.status() == WL_CONNECTED){
-      Serial.println("");
-      Serial.println("Connected");
-      Serial.print("IP address: "); 
-      Serial.println(WiFi.localIP());
-    }else{
-      Serial.println("Can't connect");
-      WiFi.disconnect();
-      WiFi.mode(WIFI_AP);
-      WiFi.softAP("SMART_WINDOW");
-      Serial.print("Started ap with ip: ");
-      Serial.println(WiFi.softAPIP());
-    }
-  }else{
-    WiFi.softAP("SMART_WINDOW");
-    Serial.print("Started ap with ip: ");
-    Serial.println(WiFi.localIP());
-  }
-  
+  connectToNetwork();
+
   server.on("/", [](){
     handleHomePage();
     server.send(200, "text/html", mainWebPage());
@@ -180,7 +147,7 @@ void loop(void){
     server.handleClient();
     delay(PAUSE_TIME);
   }else{
-    blink(1);
+    connectToNetwork();
   }
   
   if(autoTurn){
@@ -193,6 +160,46 @@ void loop(void){
     autoTurn = true;
     blink(1);
   }
+}
+
+void connectToNetwork(){
+  networkName = readFromEEPROM(NETWORK_NAME_OFFSET);
+  networkPassword = readFromEEPROM(NETWORK_PASSWORD_OFFSET);
+  if(networkName.length() > 0){
+    int c = 0;
+    WiFi.disconnect();
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(networkName, networkPassword);
+    Serial.print("Connecting to ");
+    Serial.print(networkName);
+    Serial.print(" with password ");
+    Serial.println(networkPassword);
+    while (c < CONNECT_TRIES && WiFi.status() != WL_CONNECTED) {
+      blink(2);
+      Serial.print(".");
+      c++;
+    }
+    if(WiFi.status() == WL_CONNECTED){
+      Serial.println("");
+      Serial.println("Connected");
+      Serial.print("IP address: "); 
+      Serial.println(WiFi.localIP());
+    }else{
+      Serial.println("Can't connect");
+      WiFi.disconnect();
+      WiFi.mode(WIFI_AP);
+      WiFi.softAP("SMART_WINDOW");
+      Serial.print("Started ap with ip: ");
+      Serial.println(WiFi.softAPIP());
+    }
+  }else{
+    WiFi.disconnect();
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP("SMART_WINDOW");
+    Serial.print("Started ap with ip: ");
+    Serial.println(WiFi.localIP());
+  }
+  
 }
 
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)

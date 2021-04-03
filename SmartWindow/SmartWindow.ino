@@ -77,7 +77,6 @@ String networkName = "", networkPassword = "";
 
 void setup(void){
   Serial.begin(115200);
-  WiFi.hostname(readFromEEPROM(DEVICE_NAME_OFFSET));
   openValue = readFromEEPROM(OPEN_VALUE_OFFSET).toInt();
   closeValue = readFromEEPROM(CLOSE_VALUE_OFFSET).toInt();
   
@@ -163,11 +162,12 @@ void loop(void){
 }
 
 void connectToNetwork(){
+  WiFi.disconnect();
+  WiFi.hostname(readFromEEPROM(DEVICE_NAME_OFFSET));
   networkName = readFromEEPROM(NETWORK_NAME_OFFSET);
   networkPassword = readFromEEPROM(NETWORK_PASSWORD_OFFSET);
   if(networkName.length() > 0){
     int c = 0;
-    WiFi.disconnect();
     WiFi.mode(WIFI_STA);
     WiFi.begin(networkName, networkPassword);
     Serial.print("Connecting to ");
@@ -187,13 +187,13 @@ void connectToNetwork(){
     }else{
       Serial.println("Can't connect");
       WiFi.disconnect();
+      WiFi.hostname(readFromEEPROM(DEVICE_NAME_OFFSET));
       WiFi.mode(WIFI_AP);
       WiFi.softAP("SMART_WINDOW");
       Serial.print("Started ap with ip: ");
       Serial.println(WiFi.softAPIP());
     }
   }else{
-    WiFi.disconnect();
     WiFi.mode(WIFI_AP);
     WiFi.softAP("SMART_WINDOW");
     Serial.print("Started ap with ip: ");
@@ -228,11 +228,11 @@ void handleHomePage(){
       writeToEEPROM(CLOSE_VALUE_OFFSET, server.arg(PARAM_CLOSE));
     }
     if (server.arg(PARAM_ANGLE) != "") {
-      autoTurn = false;
       int angle = server.arg(PARAM_ANGLE).toInt();
       if(angle > 0){
-        servo_left.write(180 - angle);
-        servo_right.write(angle);
+        autoTurn = false;
+        turnLeft(angle);
+        turnRight(180 - angle);
       }
     }
     if (server.arg(PARAM_AUTO) != "") {
@@ -315,10 +315,10 @@ void blink(int c){
 }
 
 void turnLeft(int d){
-  if(d >= MIN_ANGLE && d <= 180 - MIN_ANGLE && servo_left.read() != d ) servo_left.write(d);
+  if(servo_left.read() != d ) servo_left.write(d);
 }
 void turnRight(int d){
-  if(d >= MIN_ANGLE && d <= 180 - MIN_ANGLE && servo_right.read() != d ) servo_right.write(d);
+  if(servo_right.read() != d ) servo_right.write(d);
 }
 
 void open(boolean leftServ, boolean rightServ){
@@ -342,10 +342,10 @@ void autoTurnServo(){
   }else if (analogRead(LIGHT_PIN) > openValue){
     open(true, true);
   }else{
-    int angle = map(analogRead(LIGHT_PIN), openValue, closeValue, MIN_ANGLE, 180 - MIN_ANGLE);
-    if(abs(angle - servo_right.read()) > ANGLE_DIFFERENCE){
-      turnLeft(180 - angle);
-      turnRight(angle);
+    int angle = map(analogRead(LIGHT_PIN), closeValue, openValue, MIN_ANGLE, 180 - MIN_ANGLE);
+    if(abs(180 - angle - servo_right.read()) > ANGLE_DIFFERENCE && abs(angle - servo_left.read()) > ANGLE_DIFFERENCE ){
+      turnLeft(angle);
+      turnRight(180 - angle);
     }
   }
 }
@@ -445,7 +445,11 @@ String buildJson() {
   }
   json += "\"\n,\"name\":\"";
   json += WiFi.hostname();
-  json += "\"\n}";
+  json += "\"\n,\"networkName\":\"";
+  json += networkName;
+  json += "\",\"networkPassword\":\"";
+  json += networkPassword;
+  json += "\"}";
   return json;
 }
 

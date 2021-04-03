@@ -13,6 +13,7 @@
 #define DEVICE_NAME_PARAM "device_name_set"
 #define NETWORK_NAME_SET "network_name_set"
 #define NETWORK_PASSWORD_SET "network_password_set"
+
 #define PAUSE_TIME 250
 #define CONNECT_TRIES 10
 #define ANGLE_DIFFERENCE 10
@@ -37,7 +38,7 @@ RotaryFullStep rotary(ENCODER_PIN1, ENCODER_PIN2);
 
 String pageStart = R"=====(<style>
           body{
-             background: url(https://sun9-1.userapi.com/impg/hEAhUJ9G4XJuhY-OgqdDZWu8lZrw_7Re6v0kvA/y_lJSGTiOdE.jpg?size=2560x1640&quality=96&sign=f700f032283a93104c625cc76930362f&type=album) no-repeat fixed center; background-size: 100%;
+             background: url(https://sun9-1.userapi.com/impg/hEAhUJ9G4XJuhY-OgqdDZWu8lZrw_7Re6v0kvA/y_lJSGTiOdE.jpg?size=2560x1640&quality=96&sign=f700f032283a93104c625cc76930362f&type=album) background-size: 100%;
           }
          .smoove{
               margin: 5px;
@@ -71,14 +72,14 @@ String pageStart = R"=====(<style>
 )====="; 
 
 boolean autoTurn = true;
-int openValue = 800;
-int closeValue = 500;
-String networkName = "", networkPassword = "";
+int openValue, closeValue;
+String networkName, networkPassword, deviceName;
 
 void setup(void){
   Serial.begin(115200);
   openValue = readFromEEPROM(OPEN_VALUE_OFFSET).toInt();
   closeValue = readFromEEPROM(CLOSE_VALUE_OFFSET).toInt();
+  deviceName = readFromEEPROM(DEVICE_NAME_OFFSET);
   
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN1), handleEncoder, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN2), handleEncoder, CHANGE);
@@ -163,12 +164,12 @@ void loop(void){
 
 void connectToNetwork(){
   WiFi.disconnect();
-  WiFi.hostname(readFromEEPROM(DEVICE_NAME_OFFSET));
   networkName = readFromEEPROM(NETWORK_NAME_OFFSET);
   networkPassword = readFromEEPROM(NETWORK_PASSWORD_OFFSET);
   if(networkName.length() > 0){
     int c = 0;
     WiFi.mode(WIFI_STA);
+    WiFi.hostname(deviceName);
     WiFi.begin(networkName, networkPassword);
     Serial.print("Connecting to ");
     Serial.print(networkName);
@@ -187,7 +188,6 @@ void connectToNetwork(){
     }else{
       Serial.println("Can't connect");
       WiFi.disconnect();
-      WiFi.hostname(readFromEEPROM(DEVICE_NAME_OFFSET));
       WiFi.mode(WIFI_AP);
       WiFi.softAP("SMART_WINDOW");
       Serial.print("Started ap with ip: ");
@@ -246,11 +246,10 @@ void handleHomePage(){
     if(server.arg(DEVICE_NAME_PARAM ) != ""){
       String name = server.arg(DEVICE_NAME_PARAM);
       if(name.length() <= 20 && !name.equals(WiFi.hostname())){
-        if(!name.startsWith("{w}")){
-          name = "{w}" + name;
-        }
-        writeToEEPROM(DEVICE_NAME_OFFSET, name);
-        WiFi.hostname(name);
+        deviceName = name;
+        deviceName.toUpperCase();
+        writeToEEPROM(DEVICE_NAME_OFFSET, deviceName);
+        WiFi.hostname(deviceName);
       }
     }
     if (server.arg(NETWORK_NAME_SET) != "" && server.arg(NETWORK_NAME_SET).length() < 20) {
@@ -389,9 +388,9 @@ String mainWebPage(){
             <input type="submit" value="set" class = "smoove">
           </form></div>)=====";
   webPage += R"=====(<div class = "block">
-          <form action="/">Set device name: 
+          <form action="/">Set device name (it should contain only letters): 
             <input type="text" name="device_name_set" class = "smoove" maxlength = "20" value = ")=====";
-  webPage += WiFi.hostname();
+  webPage += deviceName;
   webPage += R"=====(">
             <input type="submit" value="change" class = "smoove">
           </form></div>)=====";
@@ -444,7 +443,7 @@ String buildJson() {
     json += "false";
   }
   json += "\"\n,\"name\":\"";
-  json += WiFi.hostname();
+  json += deviceName.startsWith("{w}") ? deviceName : "{w}" + deviceName;
   json += "\"\n,\"networkName\":\"";
   json += networkName;
   json += "\",\"networkPassword\":\"";

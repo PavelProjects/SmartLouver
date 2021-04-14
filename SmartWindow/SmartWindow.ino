@@ -17,7 +17,8 @@
 #define PAUSE_TIME 250
 #define CONNECT_TRIES 10
 #define ANGLE_DIFFERENCE 10
-#define MIN_ANGLE 30
+#define MAX_ANGLE 150
+#define CLOSE_ANGLE 0
 #define TURN_STEP 10
 #define DEVICE_NAME_OFFSET 1
 #define OPEN_VALUE_OFFSET 21
@@ -38,7 +39,7 @@ RotaryFullStep rotary(ENCODER_PIN1, ENCODER_PIN2);
 
 String pageStart = R"=====(<style>
           body{
-             background: url(https://sun9-1.userapi.com/impg/hEAhUJ9G4XJuhY-OgqdDZWu8lZrw_7Re6v0kvA/y_lJSGTiOdE.jpg?size=2560x1640&quality=96&sign=f700f032283a93104c625cc76930362f&type=album) background-size: 100%;
+             background: url(https://sun9-1.userapi.com/impg/hEAhUJ9G4XJuhY-OgqdDZWu8lZrw_7Re6v0kvA/y_lJSGTiOdE.jpg?size=2560x1640&quality=96&sign=f700f032283a93104c625cc76930362f&type=album); background-size: 100%;
           }
          .smoove{
               margin: 5px;
@@ -321,8 +322,8 @@ void turnRight(int d){
 }
 
 void open(boolean leftServ, boolean rightServ){
-  if(leftServ) turnLeft(180 - MIN_ANGLE);
-  if(rightServ) turnRight(MIN_ANGLE);
+  if(leftServ) turnLeft(MAX_ANGLE);
+  if(rightServ) turnRight(180 - MAX_ANGLE);
 }
 
 void middle(boolean leftServ, boolean rightServ){
@@ -331,8 +332,8 @@ void middle(boolean leftServ, boolean rightServ){
 }
 
 void close(boolean leftServ, boolean rightServ){
-  if(leftServ) turnLeft(MIN_ANGLE);
-  if(rightServ) turnRight(180 - MIN_ANGLE);
+  if(leftServ) turnLeft(CLOSE_ANGLE);
+  if(rightServ) turnRight(180 - CLOSE_ANGLE);
 }
 
 void autoTurnServo(){
@@ -341,7 +342,7 @@ void autoTurnServo(){
   }else if (analogRead(LIGHT_PIN) > openValue){
     open(true, true);
   }else{
-    int angle = map(analogRead(LIGHT_PIN), closeValue, openValue, MIN_ANGLE, 180 - MIN_ANGLE);
+    int angle = map(analogRead(LIGHT_PIN), closeValue, openValue, CLOSE_ANGLE, MAX_ANGLE);
     if(abs(180 - angle - servo_right.read()) > ANGLE_DIFFERENCE && abs(angle - servo_left.read()) > ANGLE_DIFFERENCE ){
       turnLeft(angle);
       turnRight(180 - angle);

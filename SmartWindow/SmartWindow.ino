@@ -9,6 +9,7 @@
 #define PARAM_OPEN "open_set"
 #define PARAM_CLOSE "close_set"
 #define PARAM_ANGLE "angle_set"
+#define PARAM_BRIGHT "bright_set"
 #define PARAM_AUTO "auto_set"
 #define DEVICE_NAME_PARAM "device_name_set"
 #define NETWORK_NAME_SET "network_name_set"
@@ -23,8 +24,9 @@
 #define DEVICE_NAME_OFFSET 1
 #define OPEN_VALUE_OFFSET 21
 #define CLOSE_VALUE_OFFSET 31
-#define NETWORK_NAME_OFFSET 41
-#define NETWORK_PASSWORD_OFFSET 61
+#define BRIGHT_VALUE_OFFSET 41
+#define NETWORK_NAME_OFFSET 51
+#define NETWORK_PASSWORD_OFFSET 71
 
 #define SERVO_LEFT_PIN 5
 #define SERVO_RIGHT_PIN 4
@@ -73,13 +75,14 @@ String pageStart = R"=====(<style>
 )====="; 
 
 boolean autoTurn = true;
-int openValue, closeValue;
+int openValue, closeValue, brightValue;
 String networkName, networkPassword, deviceName;
 
 void setup(void){
   Serial.begin(115200);
   openValue = readFromEEPROM(OPEN_VALUE_OFFSET).toInt();
   closeValue = readFromEEPROM(CLOSE_VALUE_OFFSET).toInt();
+  brightValue = readFromEEPROM(BRIGHT_VALUE_OFFSET).toInt();
   deviceName = readFromEEPROM(DEVICE_NAME_OFFSET);
   
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN1), handleEncoder, CHANGE);
@@ -228,6 +231,10 @@ void handleHomePage(){
       closeValue = server.arg(PARAM_CLOSE).toInt();
       writeToEEPROM(CLOSE_VALUE_OFFSET, server.arg(PARAM_CLOSE));
     }
+    if (server.arg(PARAM_BRIGHT) != "" && server.arg(PARAM_BRIGHT).length() < 8) {
+      brightValue = server.arg(PARAM_BRIGHT).toInt();
+      writeToEEPROM(BRIGHT_VALUE_OFFSET, server.arg(PARAM_BRIGHT));
+    }
     if (server.arg(PARAM_ANGLE) != "") {
       int angle = server.arg(PARAM_ANGLE).toInt();
       if(angle > 0){
@@ -255,10 +262,12 @@ void handleHomePage(){
     }
     if (server.arg(NETWORK_NAME_SET) != "" && server.arg(NETWORK_NAME_SET).length() < 20) {
       networkName = server.arg(NETWORK_NAME_SET);
+      networkName.trim();
       writeToEEPROM(NETWORK_NAME_OFFSET, server.arg(NETWORK_NAME_SET));
     }
     if (server.arg(NETWORK_PASSWORD_SET) != "" && server.arg(NETWORK_PASSWORD_SET).length() < 20) {
       networkPassword = server.arg(NETWORK_PASSWORD_SET);
+      networkPassword.trim();
       writeToEEPROM(NETWORK_PASSWORD_OFFSET, server.arg(NETWORK_PASSWORD_SET));
     }
 }
@@ -321,6 +330,11 @@ void turnRight(int d){
   if(servo_right.read() != d ) servo_right.write(d);
 }
 
+void openFull(boolean leftServ, boolean rightServ){
+  if(leftServ) turnLeft(0);
+  if(rightServ) turnRight(180);
+}
+
 void open(boolean leftServ, boolean rightServ){
   if(leftServ) turnLeft(MAX_ANGLE);
   if(rightServ) turnRight(180 - MAX_ANGLE);
@@ -337,12 +351,17 @@ void close(boolean leftServ, boolean rightServ){
 }
 
 void autoTurnServo(){
-  if(analogRead(LIGHT_PIN) < closeValue){
+  int lightVal = analogRead(LIGHT_PIN);
+  if(lightVal < closeValue){
     close(true, true);
-  }else if (analogRead(LIGHT_PIN) > openValue){
-    open(true, true);
+  }else if (lightVal > openValue){
+    if(lightVal >= brightValue){
+      openFull(true, true);
+    }else{
+      open(true, true);
+    }
   }else{
-    int angle = map(analogRead(LIGHT_PIN), closeValue, openValue, CLOSE_ANGLE, MAX_ANGLE);
+    int angle = map(lightVal, closeValue, openValue, CLOSE_ANGLE, MAX_ANGLE);
     if(abs(180 - angle - servo_right.read()) > ANGLE_DIFFERENCE && abs(angle - servo_left.read()) > ANGLE_DIFFERENCE ){
       turnLeft(angle);
       turnRight(180 - angle);
@@ -376,18 +395,26 @@ String mainWebPage(){
   webPage += "<p> Light analog value = ";
   webPage +=  analogRead(LIGHT_PIN);
   webPage += "</p>";
-  webPage += "<p>Open/close values : ";
+  webPage += "<p>bright/open/close values : ";
+  webPage += brightValue;
+  webPage += "/";
   webPage += openValue;
   webPage += "/";
   webPage += closeValue;
-  webPage += R"=====(<form action="/">Set open value (open if light greater):
+  webPage += R"=====(
+          <form action="/" >Set bright value (turns up if light >=): 
+            <input type="number" name="bright_set" class = "smoove" maxlength = "8">
+            <input type="submit" value="set" class = "smoove">
+          </form>
+          <form action="/">Set open value (open if light greater):
              <input type="number" name="open_set" class = "smoove" maxlength = "8">
               <input type="submit" value="set" class = "smoove">
             </form>
           <form action="/" >Set close value (close if ligth less): 
             <input type="number" name="close_set" class = "smoove" maxlength = "8">
             <input type="submit" value="set" class = "smoove">
-          </form></div>)=====";
+          </form>
+          </div>)=====";
   webPage += R"=====(<div class = "block">
           <form action="/">Set device name (it should contain only letters): 
             <input type="text" name="device_name_set" class = "smoove" maxlength = "20" value = ")=====";
@@ -437,6 +464,8 @@ String buildJson() {
   json += closeValue;
   json += "\",\n\"openValue\":\"";
   json += openValue;
+  json += "\",\n\"brightValue\":\"";
+  json += brightValue;
   json += "\",\n\"autoTurn\":\"";
   if (autoTurn) {
     json += "true";

@@ -17,16 +17,25 @@
 
 #define PAUSE_TIME 250
 #define CONNECT_TRIES 10
+#define RECONNECT_TIMEOUT 1000
 #define ANGLE_DIFFERENCE 10
-#define MAX_ANGLE 150
-#define CLOSE_ANGLE 0
-#define TURN_STEP 10
 #define DEVICE_NAME_OFFSET 1
 #define OPEN_VALUE_OFFSET 21
 #define CLOSE_VALUE_OFFSET 31
 #define BRIGHT_VALUE_OFFSET 41
 #define NETWORK_NAME_OFFSET 51
 #define NETWORK_PASSWORD_OFFSET 71
+
+#define OTA_PAUSE 500
+#define HANDLE_PAUSE 200
+#define AUTO_TURN_PAUSE 500
+#define BUTTON_PAUSE 100
+
+#define BRIGHT_ANGLE 180
+#define OPEN_ANGLE 150
+#define CLOSE_ANGLE 10
+#define MIDDLE_ANGLE 90
+#define TURN_STEP 5
 
 #define SERVO_LEFT_PIN 5
 #define SERVO_RIGHT_PIN 4
@@ -40,8 +49,15 @@ ESP8266WebServer server(3257);
 RotaryFullStep rotary(ENCODER_PIN1, ENCODER_PIN2);
 
 String pageStart = R"=====(<style>
-          body{
+          .picture{
              background: url(https://sun9-1.userapi.com/impg/hEAhUJ9G4XJuhY-OgqdDZWu8lZrw_7Re6v0kvA/y_lJSGTiOdE.jpg?size=2560x1640&quality=96&sign=f700f032283a93104c625cc76930362f&type=album); background-size: 100%;
+          }
+          .color{
+            background: #22b6f5;
+            background: -moz-linear-gradient(top, #22b6f5, #315463);
+            background: -webkit-linear-gradient(top, #22b6f5, #315463);
+            background: -o-linear-gradient(top, #22b6f5, #315463);
+            background: -ms-linear-gradient(top, #22b6f5, #315463);
           }
          .smoove{
               margin: 5px;
@@ -80,6 +96,9 @@ String networkName, networkPassword, deviceName;
 
 void setup(void){
   Serial.begin(115200);
+  
+  networkName = readFromEEPROM(NETWORK_NAME_OFFSET);
+  networkPassword = readFromEEPROM(NETWORK_PASSWORD_OFFSET);
   openValue = readFromEEPROM(OPEN_VALUE_OFFSET).toInt();
   closeValue = readFromEEPROM(CLOSE_VALUE_OFFSET).toInt();
   brightValue = readFromEEPROM(BRIGHT_VALUE_OFFSET).toInt();
@@ -89,11 +108,10 @@ void setup(void){
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN2), handleEncoder, CHANGE);
 
   pinMode(ENCODER_BUTTON, INPUT_PULLUP);
-  pinMode(LED_BUILTIN, OUTPUT); 
+  pinMode(LED_BUILTIN, OUTPUT);
+   
   servo_right.attach(SERVO_RIGHT_PIN);
   servo_left.attach(SERVO_LEFT_PIN);
-  
-  delay(1000);
 
   connectToNetwork();
 
@@ -132,6 +150,9 @@ void setup(void){
     handleMiddlePage();
     server.send(200, "application/json", buildJson());
   });
+  server.on("/light", [](){
+    server.send(200, "text/plain", String(analogRead(LIGHT_PIN)));  
+  });
   server.on("/restart", [](){
     WiFi.disconnect();
     ESP.restart();
@@ -144,32 +165,42 @@ void setup(void){
   ArduinoOTA.begin();
 }
 
+long lastOta, lastHandle, lastAuto, lastButton;
+
 void loop(void){
-  ArduinoOTA.handle();
-  delay(PAUSE_TIME);
-  if(WiFi.status() == WL_CONNECTED || WiFi.getMode() == WIFI_AP){
-    server.handleClient();
-    delay(PAUSE_TIME);
-  }else{
-    connectToNetwork();
+  if(millis() - lastOta > OTA_PAUSE){
+    ArduinoOTA.handle();
+    lastOta = millis();
   }
   
-  if(autoTurn){
+  if(millis() - lastHandle > HANDLE_PAUSE){
+    if(WiFi.status() == WL_CONNECTED || WiFi.getMode() == WIFI_AP){
+      server.handleClient();
+      lastHandle = millis();
+    }else{
+      connectToNetwork();
+    }
+  }
+  
+  if(autoTurn && millis() - lastAuto > AUTO_TURN_PAUSE){
     autoTurnServo();
-  }else{
-    delay(PAUSE_TIME);
+    lastAuto = millis();
   }
 
-  if(digitalRead(ENCODER_BUTTON) == 0){
+  if(millis() - lastButton > BUTTON_PAUSE && digitalRead(ENCODER_BUTTON) == 0){
     autoTurn = true;
-    blink(1);
+    blink(1, 100);
+    lastButton = millis();
   }
 }
 
 void connectToNetwork(){
-  WiFi.disconnect();
-  networkName = readFromEEPROM(NETWORK_NAME_OFFSET);
-  networkPassword = readFromEEPROM(NETWORK_PASSWORD_OFFSET);
+  if(WiFi.getMode() == WIFI_AP){
+    WiFi.softAPdisconnect (true);
+  }else{
+    WiFi.disconnect();  
+  }
+  
   if(networkName.length() > 0){
     int c = 0;
     WiFi.mode(WIFI_STA);
@@ -180,30 +211,27 @@ void connectToNetwork(){
     Serial.print(" with password ");
     Serial.println(networkPassword);
     while (c < CONNECT_TRIES && WiFi.status() != WL_CONNECTED) {
-      blink(2);
       Serial.print(".");
       c++;
+      blink(2, 100);
+      delay(PAUSE_TIME);
     }
-    if(WiFi.status() == WL_CONNECTED){
-      Serial.println("");
-      Serial.println("Connected");
-      Serial.print("IP address: "); 
-      Serial.println(WiFi.localIP());
-    }else{
-      Serial.println("Can't connect");
-      WiFi.disconnect();
-      WiFi.mode(WIFI_AP);
-      WiFi.softAP("SMART_WINDOW");
-      Serial.print("Started ap with ip: ");
-      Serial.println(WiFi.softAPIP());
-    }
+  }
+  
+  if(WiFi.status() == WL_CONNECTED){
+    Serial.println("");
+    Serial.println("Connected");
+    Serial.print("IP address: "); 
+    Serial.println(WiFi.localIP());
   }else{
+    Serial.println("Can't connect");
+    WiFi.disconnect();
     WiFi.mode(WIFI_AP);
     WiFi.softAP("SMART_WINDOW");
     Serial.print("Started ap with ip: ");
-    Serial.println(WiFi.localIP());
+    Serial.println(WiFi.softAPIP());
+    blink(1, 500);
   }
-  
 }
 
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
@@ -314,11 +342,11 @@ void handleOpenPage(){
     }
 }
 
-void blink(int c){
+void blink(int c, int pauseTime){
   for(int i = 0; i < c; i++){
-    delay(PAUSE_TIME);
+    delay(pauseTime);
     digitalWrite(LED_BUILTIN, LOW);
-    delay(PAUSE_TIME);
+    delay(pauseTime);
     digitalWrite(LED_BUILTIN, HIGH);
   }
 }
@@ -331,18 +359,18 @@ void turnRight(int d){
 }
 
 void openFull(boolean leftServ, boolean rightServ){
-  if(leftServ) turnLeft(0);
-  if(rightServ) turnRight(180);
+  if(leftServ) turnLeft(BRIGHT_ANGLE);
+  if(rightServ) turnRight(180 - BRIGHT_ANGLE);
 }
 
 void open(boolean leftServ, boolean rightServ){
-  if(leftServ) turnLeft(MAX_ANGLE);
-  if(rightServ) turnRight(180 - MAX_ANGLE);
+  if(leftServ) turnLeft(OPEN_ANGLE);
+  if(rightServ) turnRight(180 - OPEN_ANGLE);
 }
 
 void middle(boolean leftServ, boolean rightServ){
-  if(leftServ) turnLeft(90);
-  if(rightServ) turnRight(90);
+  if(leftServ) turnLeft(MIDDLE_ANGLE);
+  if(rightServ) turnRight(180 - MIDDLE_ANGLE);
 }
 
 void close(boolean leftServ, boolean rightServ){
@@ -355,13 +383,21 @@ void autoTurnServo(){
   if(lightVal < closeValue){
     close(true, true);
   }else if (lightVal > openValue){
-    if(lightVal >= brightValue){
-      openFull(true, true);
+    if(brightValue != 0 && brightValue > openValue){
+      if(lightVal >= brightValue){
+        openFull(true, true);
+      }else{
+        int angle = map(lightVal, openValue, brightValue, OPEN_ANGLE, BRIGHT_ANGLE);
+        if(abs(180 - angle - servo_right.read()) > ANGLE_DIFFERENCE && abs(angle - servo_left.read()) > ANGLE_DIFFERENCE ){
+          turnLeft(angle);
+          turnRight(180 - angle);
+        }
+      }
     }else{
       open(true, true);
     }
   }else{
-    int angle = map(lightVal, closeValue, openValue, CLOSE_ANGLE, MAX_ANGLE);
+    int angle = map(lightVal, closeValue, openValue, CLOSE_ANGLE, OPEN_ANGLE);
     if(abs(180 - angle - servo_right.read()) > ANGLE_DIFFERENCE && abs(angle - servo_left.read()) > ANGLE_DIFFERENCE ){
       turnLeft(angle);
       turnRight(180 - angle);
@@ -372,21 +408,27 @@ void autoTurnServo(){
 String mainWebPage(){
   String webPage = "<html>";
   webPage += pageStart; 
-  webPage += R"=====(<body>
+  if(WiFi.getMode() == WIFI_AP){
+  webPage += R"=====(<body class = "color">
     <center>
-      <h1>Window controller</h1><p> Left angle = )=====";
+        <h1>Window controller</h1><p> Left angle = )=====";
+  }else{
+    webPage += R"=====(<body class = "picture">
+    <center>
+        <h1>Window controller</h1><p> Left angle = )=====";
+  }
   webPage += servo_left.read();
   webPage += "</p><p> Right angle = ";
   webPage += servo_right.read();
   webPage += R"=====(</p><div class = "block">
-          <p>Open <a href="open?servo=left"><button class = "smoove">Left</button></a><a href="open?servo=right"><button class = "smoove">Right</button></a><a href="open"><button class = "smoove">Both</button></a></p>
-          <p>Middle <a href="middle?servo=left"><button class = "smoove">Left</button></a><a href="middle?servo=right"><button class = "smoove">Right</button></a><a href="middle"><button class = "smoove">Both</button></a></p>
-          <p>Close <a href="close?servo=left"><button class = "smoove">Left</button></a><a href="close?servo=right"><button class = "smoove">Right</button></a><a href="close"><button class = "smoove">Both</button></a></p>
-          <form action="/" >Set angle [0, 180]: 
-            <input type="text" name="angle_set" class = "smoove">
-            <input type="submit" value="set" class = "smoove">
-          </form>
-         </div>)=====";
+            <p>Open <a href="open?servo=left"><button class = "smoove">Left</button></a><a href="open?servo=right"><button class = "smoove">Right</button></a><a href="open"><button class = "smoove">Both</button></a></p>
+            <p>Middle <a href="middle?servo=left"><button class = "smoove">Left</button></a><a href="middle?servo=right"><button class = "smoove">Right</button></a><a href="middle"><button class = "smoove">Both</button></a></p>
+            <p>Close <a href="close?servo=left"><button class = "smoove">Left</button></a><a href="close?servo=right"><button class = "smoove">Right</button></a><a href="close"><button class = "smoove">Both</button></a></p>
+            <form action="/" >Set angle [0, 180]: 
+              <input type="text" name="angle_set" class = "smoove">
+              <input type="submit" value="set" class = "smoove">
+            </form>
+           </div>)=====";
   if (autoTurn) {
     webPage += R"=====(<div class = "block"><p><font class = "ok">Auto turn is on </font></a>&nbsp;<a href="?auto_set=off"><button class = "alert">turn off</button></a></p>)=====";
   } else {
@@ -402,55 +444,41 @@ String mainWebPage(){
   webPage += "/";
   webPage += closeValue;
   webPage += R"=====(
-          <form action="/" >Set bright value (turns up if light >=): 
-            <input type="number" name="bright_set" class = "smoove" maxlength = "8">
-            <input type="submit" value="set" class = "smoove">
-          </form>
-          <form action="/">Set open value (open if light greater):
-             <input type="number" name="open_set" class = "smoove" maxlength = "8">
+            <form action="/" >Set bright value (turns up if light >=): 
+              <input type="number" name="bright_set" class = "smoove" maxlength = "8">
               <input type="submit" value="set" class = "smoove">
             </form>
-          <form action="/" >Set close value (close if ligth less): 
-            <input type="number" name="close_set" class = "smoove" maxlength = "8">
-            <input type="submit" value="set" class = "smoove">
-          </form>
-          </div>)=====";
+            <form action="/">Set open value (open if light greater):
+               <input type="number" name="open_set" class = "smoove" maxlength = "8">
+                <input type="submit" value="set" class = "smoove">
+              </form>
+            <form action="/" >Set close value (close if ligth less): 
+              <input type="number" name="close_set" class = "smoove" maxlength = "8">
+              <input type="submit" value="set" class = "smoove">
+            </form>
+            </div>)=====";
   webPage += R"=====(<div class = "block">
-          <form action="/">Set device name (it should contain only letters): 
-            <input type="text" name="device_name_set" class = "smoove" maxlength = "20" value = ")=====";
+            <form action="/">Set device name (it should contain only letters): 
+              <input type="text" name="device_name_set" class = "smoove" maxlength = "20" value = ")=====";
   webPage += deviceName;
   webPage += R"=====(">
-            <input type="submit" value="change" class = "smoove">
-          </form></div>)=====";
+              <input type="submit" value="change" class = "smoove">
+            </form></div>)=====";
   webPage += R"=====(<div class="block">
-          <form action="/">Connect to network with name:
-             <input type="name" name="network_name_set" class = "smoove" maxlength = "20" value = ")=====";
+            <form action="/">Connect to network with name:
+               <input type="name" name="network_name_set" class = "smoove" maxlength = "20" value = ")=====";
   webPage += networkName;
   webPage += R"=====("><input type="name" name="network_password_set" class = "smoove" maxlength = "20"value = ")=====";
   webPage += networkPassword;
   webPage += R"=====("><p><input type="submit" value="save" class = "smoove"></p>
-            </form></div>)=====";
+              </form></div>)=====";
   webPage += R"=====(<p><a href="/restart"><button class = "alert">***RESTART***</button></a></p>)=====";
   webPage += "</center></body></html>";
   return webPage;
 }
 
 void handle_NotFound() {
-  String apiPage = "<html>";
-  apiPage += pageStart;
-  apiPage += R"=====(<body><center><h1>Wrong address!</h1>
-        <div class = "block"
-          <p>Api:</p>
-          <ul>
-            <li>/open[?servo=[left|right]] - open left/right servo. Without paramter opens both</li>
-            <li>/middle[?servo=[left|right]] - set at middle left/right servo. Without paramter set at middle both</li>
-            <li>/close[?servo=[left|right]] - close left/right servo. Without paramter close both</li>
-            <li>/auto[?val=[on|off]] - enable/disable auto angle set</li>
-            <li>/?open_set={$val} - set {$val} as open value</li>
-            <li>/?close_set={$val} - set {$val} as close value</li>
-          </ul>
-          </div></body></center></html>)=====";
-  server.send(404, "text/html", apiPage);
+  server.send(404, "text/html", "<html><body><center><p><h2>404</h2></p><p><h1>B R U H</h1></p></center></body></html>");
 }
 
 String buildJson() {
@@ -496,8 +524,10 @@ String readFromEEPROM(int addrOffset) {
   EEPROM.begin(4096);
   int newStrLen = EEPROM.read(addrOffset);
   char data[newStrLen + 1];
+  int val = 0;
   for (int i = 0; i < newStrLen; i++) {
-    data[i] = EEPROM.read(addrOffset + 1 + i);
+    val = EEPROM.read(addrOffset + 1 + i);
+    data[i] = isAscii(val) ? val : ' ';
   }
   data[newStrLen] = '\0';
   EEPROM.commit();

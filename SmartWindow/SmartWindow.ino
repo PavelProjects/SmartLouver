@@ -35,7 +35,9 @@
 #define OPEN_ANGLE 150
 #define CLOSE_ANGLE 10
 #define MIDDLE_ANGLE 90
-#define TURN_STEP 5
+
+#define TURN_MANUAL_ANGLE_SLOW 2
+#define TURN_MANUAL_ANGLE_FAST 6
 
 #define SERVO_LEFT_PIN 5
 #define SERVO_RIGHT_PIN 4
@@ -113,7 +115,11 @@ void setup(void){
   servo_right.attach(SERVO_RIGHT_PIN);
   servo_left.attach(SERVO_LEFT_PIN);
 
-  connectToNetwork();
+  if(!connectToNetwork()){
+    while(true){
+      blink(1, 500);
+    }
+  }
 
   server.on("/", [](){
     handleHomePage();
@@ -149,6 +155,15 @@ void setup(void){
   server.on("/json/middle", [](){
     handleMiddlePage();
     server.send(200, "application/json", buildJson());
+  });
+  server.on("/fullopen", [](){
+    handleOpenFullPage();
+    server.sendHeader("Location", String("/"), true);
+    server.send ( 302, "text/plain", "");
+  });
+  server.on("/json/fullopen", [](){
+    handleOpenFullPage();
+    server.send ( 302, "application/json",  buildJson());
   });
   server.on("/light", [](){
     server.send(200, "text/plain", String(analogRead(LIGHT_PIN)));  
@@ -194,13 +209,13 @@ void loop(void){
   }
 }
 
-void connectToNetwork(){
+bool connectToNetwork(){
   if(WiFi.getMode() == WIFI_AP){
     WiFi.softAPdisconnect (true);
   }else{
     WiFi.disconnect();  
   }
-  
+  bool res = false;
   if(networkName.length() > 0){
     int c = 0;
     WiFi.mode(WIFI_STA);
@@ -223,15 +238,17 @@ void connectToNetwork(){
     Serial.println("Connected");
     Serial.print("IP address: "); 
     Serial.println(WiFi.localIP());
+    res = true;
   }else{
     Serial.println("Can't connect");
     WiFi.disconnect();
     WiFi.mode(WIFI_AP);
-    WiFi.softAP("SMART_WINDOW");
+    res = WiFi.softAP("SMART_WINDOW");
     Serial.print("Started ap with ip: ");
     Serial.println(WiFi.softAPIP());
     blink(1, 500);
   }
+  return res;
 }
 
 #if defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
@@ -239,13 +256,25 @@ ICACHE_RAM_ATTR
 #endif
 void handleEncoder(){
   int val = rotary.read();
+  switch(abs(val)){
+    case 2:
+      encoderManualTurn(val, TURN_MANUAL_ANGLE_FAST);
+      break;
+    case 1:
+      encoderManualTurn(val, TURN_MANUAL_ANGLE_SLOW);
+      break;
+  }
+  
+}
+
+void encoderManualTurn(int val, int angle){
   if (val > 0) {
-    turnLeft(servo_left.read() - 5);
-    turnRight(servo_right.read() + 5);
+    turnLeft(servo_left.read() - angle);
+    turnRight(servo_right.read() + angle);
     autoTurn = false;
   }else if(val < 0 ){
-    turnLeft(servo_left.read() + 5);
-    turnRight(servo_right.read() - 5);
+    turnLeft(servo_left.read() + angle);
+    turnRight(servo_right.read() - angle);
     autoTurn = false;
   }
 }
@@ -300,46 +329,60 @@ void handleHomePage(){
     }
 }
 
+void handleOpenFullPage(){
+  autoTurn = false;
+  if (server.arg("servo") != "") {
+    String servName = server.arg("servo");
+    if(servName.equals("left")){
+      openFull(true, false);
+    }else if(servName.equals("right")){
+      openFull(false, true);
+    }
+  }else{
+    openFull(true, true);
+  }
+}
+
 void handleMiddlePage(){
   autoTurn = false;
-    if (server.arg("servo") != "") {
-      String servName = server.arg("servo");
-      if(servName.equals("left")){
-        middle(true, false);
-      }else if(servName.equals("right")){
-        middle(false, true);
-      }
-    }else{
-      middle(true, true);
+  if (server.arg("servo") != "") {
+    String servName = server.arg("servo");
+    if(servName.equals("left")){
+      middle(true, false);
+    }else if(servName.equals("right")){
+      middle(false, true);
     }
+  }else{
+    middle(true, true);
+  }
 }
 
 void handleClosePage(){
   autoTurn = false;
-    if (server.arg("servo") != "") {
-      String servName = server.arg("servo");
-      if(servName.equals("left")){
-        close(true, false);
-      }else if(servName.equals("right")){
-        close(false, true);
-      }
-    }else{
-      close(true, true);
+  if (server.arg("servo") != "") {
+    String servName = server.arg("servo");
+    if(servName.equals("left")){
+      close(true, false);
+    }else if(servName.equals("right")){
+      close(false, true);
     }
+  }else{
+    close(true, true);
+  }
 }
 
 void handleOpenPage(){
   autoTurn = false;
-    if (server.arg("servo") != "") {
-      String servName = server.arg("servo");
-      if(servName.equals("left")){
-        open(true, false);
-      }else if(servName.equals("right")){
-        open(false, true);
-      }
-    }else{
-      open(true, true);
+  if (server.arg("servo") != "") {
+    String servName = server.arg("servo");
+    if(servName.equals("left")){
+      open(true, false);
+    }else if(servName.equals("right")){
+      open(false, true);
     }
+  }else{
+    open(true, true);
+  }
 }
 
 void blink(int c, int pauseTime){
@@ -409,25 +452,21 @@ String mainWebPage(){
   String webPage = "<html>";
   webPage += pageStart; 
   if(WiFi.getMode() == WIFI_AP){
-  webPage += R"=====(<body class = "color">
-    <center>
-        <h1>Window controller</h1><p> Left angle = )=====";
+    webPage += "<body class = \"color\">";
   }else{
-    webPage += R"=====(<body class = "picture">
-    <center>
-        <h1>Window controller</h1><p> Left angle = )=====";
+    webPage += "<body class = \"picture\">";
   }
+  webPage += "<center><h1>Window :: ";
+  webPage += deviceName;
+  webPage += "</h1><p> left | right angle </p><p>";
   webPage += servo_left.read();
-  webPage += "</p><p> Right angle = ";
+  webPage += " | ";
   webPage += servo_right.read();
   webPage += R"=====(</p><div class = "block">
+            <p>Open bright <a href="fullopen?servo=left"><button class = "smoove">Left</button></a><a href="fullopen?servo=right"><button class = "smoove">Right</button></a><a href="fullopen"><button class = "smoove">Both</button></a></p>
             <p>Open <a href="open?servo=left"><button class = "smoove">Left</button></a><a href="open?servo=right"><button class = "smoove">Right</button></a><a href="open"><button class = "smoove">Both</button></a></p>
             <p>Middle <a href="middle?servo=left"><button class = "smoove">Left</button></a><a href="middle?servo=right"><button class = "smoove">Right</button></a><a href="middle"><button class = "smoove">Both</button></a></p>
             <p>Close <a href="close?servo=left"><button class = "smoove">Left</button></a><a href="close?servo=right"><button class = "smoove">Right</button></a><a href="close"><button class = "smoove">Both</button></a></p>
-            <form action="/" >Set angle [0, 180]: 
-              <input type="text" name="angle_set" class = "smoove">
-              <input type="submit" value="set" class = "smoove">
-            </form>
            </div>)=====";
   if (autoTurn) {
     webPage += R"=====(<div class = "block"><p><font class = "ok">Auto turn is on </font></a>&nbsp;<a href="?auto_set=off"><button class = "alert">turn off</button></a></p>)=====";

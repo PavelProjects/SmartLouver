@@ -29,18 +29,16 @@
 #define OTA_PAUSE 500
 #define HANDLE_PAUSE 200
 #define AUTO_TURN_PAUSE 500
-#define BUTTON_PAUSE 100
+#define BUTTON_FROM_ENCODER_PAUSE 200
 
 #define BRIGHT_ANGLE 180
 #define OPEN_ANGLE 150
 #define CLOSE_ANGLE 10
 #define MIDDLE_ANGLE 90
+#define TURN_MANUAL_ANGLE 5
 
-#define TURN_MANUAL_ANGLE_SLOW 2
-#define TURN_MANUAL_ANGLE_FAST 6
-
-#define SERVO_LEFT_PIN 5
-#define SERVO_RIGHT_PIN 4
+#define SERVO_LEFT_PIN 4
+#define SERVO_RIGHT_PIN 0
 #define LIGHT_PIN A0
 #define ENCODER_BUTTON 14
 #define ENCODER_PIN1 12
@@ -101,10 +99,16 @@ void setup(void){
   
   networkName = readFromEEPROM(NETWORK_NAME_OFFSET);
   networkPassword = readFromEEPROM(NETWORK_PASSWORD_OFFSET);
+  networkName.trim(); networkPassword.trim();
   openValue = readFromEEPROM(OPEN_VALUE_OFFSET).toInt();
+  openValue = openValue == 0 ? 900 : openValue;
   closeValue = readFromEEPROM(CLOSE_VALUE_OFFSET).toInt();
+  closeValue = closeValue == 0 ? 300 : closeValue;
   brightValue = readFromEEPROM(BRIGHT_VALUE_OFFSET).toInt();
+  brightValue = brightValue == 0 ? 1024 : brightValue;
   deviceName = readFromEEPROM(DEVICE_NAME_OFFSET);
+  deviceName.trim();
+  deviceName = deviceName.isEmpty() ? "SMARTWINDOW" : deviceName;
   
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN1), handleEncoder, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN2), handleEncoder, CHANGE);
@@ -186,23 +190,29 @@ void loop(void){
   if(millis() - lastOta > OTA_PAUSE){
     ArduinoOTA.handle();
     lastOta = millis();
+    Serial.println("Check OTA");
   }
   
   if(millis() - lastHandle > HANDLE_PAUSE){
+    Serial.println("Check network");
     if(WiFi.status() == WL_CONNECTED || WiFi.getMode() == WIFI_AP){
+      Serial.println("Handle client");
       server.handleClient();
-      lastHandle = millis();
+      lastHandle = millis();  
     }else{
+      Serial.println("Reconnect");
       connectToNetwork();
     }
   }
   
   if(autoTurn && millis() - lastAuto > AUTO_TURN_PAUSE){
+    Serial.println("Auto turn");
     autoTurnServo();
     lastAuto = millis();
   }
 
-  if(millis() - lastButton > BUTTON_PAUSE && digitalRead(ENCODER_BUTTON) == 0){
+  if(millis() - lastButton > BUTTON_FROM_ENCODER_PAUSE && digitalRead(ENCODER_BUTTON) == 0){
+    Serial.println("Handle button");
     autoTurn = true;
     blink(1, 100);
     lastButton = millis();
@@ -256,26 +266,16 @@ ICACHE_RAM_ATTR
 #endif
 void handleEncoder(){
   int val = rotary.read();
-  switch(abs(val)){
-    case 2:
-      encoderManualTurn(val, TURN_MANUAL_ANGLE_FAST);
-      break;
-    case 1:
-      encoderManualTurn(val, TURN_MANUAL_ANGLE_SLOW);
-      break;
-  }
-  
-}
-
-void encoderManualTurn(int val, int angle){
   if (val > 0) {
-    turnLeft(servo_left.read() - angle);
-    turnRight(servo_right.read() + angle);
+    turnLeft(servo_left.read() - TURN_MANUAL_ANGLE);
+    turnRight(servo_right.read() + TURN_MANUAL_ANGLE);
     autoTurn = false;
+    lastButton = millis();
   }else if(val < 0 ){
-    turnLeft(servo_left.read() + angle);
-    turnRight(servo_right.read() - angle);
+    turnLeft(servo_left.read() + TURN_MANUAL_ANGLE);
+    turnRight(servo_right.read() - TURN_MANUAL_ANGLE);
     autoTurn = false;
+    lastButton = millis();
   }
 }
 

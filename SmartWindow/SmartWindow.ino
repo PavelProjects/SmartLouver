@@ -5,19 +5,28 @@
 #include <ArduinoOTA.h>
 #include <EEPROM.h>
 #include <ErriezRotaryFullStep.h>
+#include <ArduinoJson.h>
 
-#define PARAM_OPEN "open_set"
-#define PARAM_CLOSE "close_set"
-#define PARAM_ANGLE "angle_set"
-#define PARAM_BRIGHT "bright_set"
+#define PARAM_TYPE "type"
+#define PARAM_OPEN "open"
+#define PARAM_CLOSE "close"
+#define PARAM_BRIGHT "bright"
 #define PARAM_AUTO "auto_set"
-#define DEVICE_NAME_PARAM "device_name_set"
-#define NETWORK_NAME_SET "network_name_set"
-#define NETWORK_PASSWORD_SET "network_password_set"
+#define PARAM_DEVICE_NAME "device_name"
+#define PARAM_NETWORK_NAME "network_name"
+#define PARAM_NETWORK_PASSWORD "network_password"
+#define PARAM_ACTION "action"
+#define PARAM_VALUE "value"
+
+#define ACTION_OPEN_BRIGHT "action_bright"
+#define ACTION_OPEN "action_open"
+#define ACTION_CLOSE"action_close"
+#define ACTION_MIDDLE "action_middle"
+#define ACTION_AUTO_TURN "action_auto_turn"
+#define ACTION_SAVE_SETTINGS "action_save"
 
 #define PAUSE_TIME 250
 #define CONNECT_TRIES 10
-#define RECONNECT_TIMEOUT 1000
 #define ANGLE_DIFFERENCE 10
 #define DEVICE_NAME_OFFSET 1
 #define OPEN_VALUE_OFFSET 21
@@ -33,7 +42,7 @@
 
 #define BRIGHT_ANGLE 180
 #define OPEN_ANGLE 150
-#define CLOSE_ANGLE 10
+#define CLOSE_ANGLE 5
 #define MIDDLE_ANGLE 90
 #define TURN_MANUAL_ANGLE 5
 
@@ -44,13 +53,15 @@
 #define ENCODER_PIN1 12
 #define ENCODER_PIN2 13
 
+#define START_AP 1
+
 Servo servo_right, servo_left;
 ESP8266WebServer server(3257);
 RotaryFullStep rotary(ENCODER_PIN1, ENCODER_PIN2);
 
 String pageStart = R"=====(<style>
           .picture{
-             background: url(https://sun9-1.userapi.com/impg/hEAhUJ9G4XJuhY-OgqdDZWu8lZrw_7Re6v0kvA/y_lJSGTiOdE.jpg?size=2560x1640&quality=96&sign=f700f032283a93104c625cc76930362f&type=album); background-size: 100%;
+             background: url(https://sun9-1.userapi.com/impg/hEAhUJ9G4XJuhY-OgqdDZWu8lZrw_7Re6v0kvA/y_lJSGTiOdE.jpg?size=2560x1640&quality=96&sign=f700f032283a93104c625cc76930362f&type=album); background-repeat: no-repeat; background-size: auto;
           }
           .color{
             background: #22b6f5;
@@ -67,7 +78,7 @@ String pageStart = R"=====(<style>
               border: 1px solid #0b2cde;
               border-radius: 4px;
               background-color: rgba(150, 170, 195, 0.4);
-            width: 350px;
+              width: 350px;
           }
           .alert{
               margin: 5px;
@@ -76,17 +87,18 @@ String pageStart = R"=====(<style>
               background-color: red;
           }
           .ok{
-               margin: 5px;
+             margin: 5px;
              border-radius: 8px;
              border: 1px solid #eb1010;
-              background-color: green;
+             background-color: green;
           }
       </style>
   <head>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'/>
     <meta charset='utf-8'>
-    <meta http-equiv='refresh' content='20'>
+    <meta http-equiv='refresh' content='60'>
     <title>Window controller</title>
+    <link rel='icon' href='https://psv4.userapi.com/c856428/u291961412/docs/d11/c98618fcbc08/clap.gif' type="image/gif">
   </head>
 )====="; 
 
@@ -108,8 +120,7 @@ void setup(void){
   brightValue = brightValue == 0 ? 1024 : brightValue;
   deviceName = readFromEEPROM(DEVICE_NAME_OFFSET);
   deviceName.trim();
-  deviceName = deviceName.isEmpty() ? "SMARTWINDOW" : deviceName;
-  
+
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN1), handleEncoder, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN2), handleEncoder, CHANGE);
 
@@ -126,54 +137,40 @@ void setup(void){
   }
 
   server.on("/", [](){
-    handleHomePage();
     server.send(200, "text/html", mainWebPage());
   });
+
   server.on("/json", [](){
-    handleHomePage();
-    server.send(200, "application/json", buildJson());
+    server.send(200, "text/html", buildJson());
   });
-  server.on("/close", [](){
-    handleClosePage();
+  
+  server.on("/smarthome", [](){
+    if(server.hasArg("plain")){
+      server.send (consumeSmartHome(server.arg("plain")) ? 200 : 500, "application/json",  buildJson());
+    }else{
+      server.send (400, "application/json",  buildJson());
+    } 
+  });
+  
+  server.on("/actions", [](){
+    consumeAction(server.arg(PARAM_ACTION), server.arg(PARAM_VALUE));
     server.sendHeader("Location", String("/"), true);
-    server.send ( 302, "text/plain", "");
+    server.send ( 302, "text/html", "");
   });
-  server.on("/json/close", [](){
-    handleClosePage();
-    server.send(200, "application/json", buildJson());
-  });
-  server.on("/open", [](){
-    handleOpenPage();
+  
+  server.on("/settings", [](){
+    for(int i = 0; i < server.args() - 1; i += 2){
+      consumeSetting(server.arg(i), server.arg(i+1));
+    }
     server.sendHeader("Location", String("/"), true);
-    server.send ( 302, "text/plain", "");
+    server.send ( 302, "text/html", "");
   });
-  server.on("/json/open", [](){
-    handleOpenPage();
-    server.send(200, "application/json", buildJson());
-  });
-   server.on("/middle", [](){
-    handleMiddlePage();
-    server.sendHeader("Location", String("/"), true);
-    server.send ( 302, "text/plain", "");
-  });
-  server.on("/json/middle", [](){
-    handleMiddlePage();
-    server.send(200, "application/json", buildJson());
-  });
-  server.on("/fullopen", [](){
-    handleOpenFullPage();
-    server.sendHeader("Location", String("/"), true);
-    server.send ( 302, "text/plain", "");
-  });
-  server.on("/json/fullopen", [](){
-    handleOpenFullPage();
-    server.send ( 302, "application/json",  buildJson());
-  });
+  
   server.on("/light", [](){
-    server.send(200, "text/plain", String(analogRead(LIGHT_PIN)));  
+    server.send(200, "text/html", String(analogRead(LIGHT_PIN)));  
   });
+  
   server.on("/restart", [](){
-    WiFi.disconnect();
     ESP.restart();
   });
   
@@ -190,29 +187,23 @@ void loop(void){
   if(millis() - lastOta > OTA_PAUSE){
     ArduinoOTA.handle();
     lastOta = millis();
-    Serial.println("Check OTA");
   }
   
   if(millis() - lastHandle > HANDLE_PAUSE){
-    Serial.println("Check network");
     if(WiFi.status() == WL_CONNECTED || WiFi.getMode() == WIFI_AP){
-      Serial.println("Handle client");
       server.handleClient();
       lastHandle = millis();  
-    }else{
-      Serial.println("Reconnect");
+    }else if (START_AP){
       connectToNetwork();
     }
   }
   
   if(autoTurn && millis() - lastAuto > AUTO_TURN_PAUSE){
-    Serial.println("Auto turn");
     autoTurnServo();
     lastAuto = millis();
   }
 
   if(millis() - lastButton > BUTTON_FROM_ENCODER_PAUSE && digitalRead(ENCODER_BUTTON) == 0){
-    Serial.println("Handle button");
     autoTurn = true;
     blink(1, 100);
     lastButton = millis();
@@ -225,8 +216,8 @@ bool connectToNetwork(){
   }else{
     WiFi.disconnect();  
   }
-  bool res = false;
-  if(networkName.length() > 0){
+
+  if(!networkName.isEmpty()){
     int c = 0;
     WiFi.mode(WIFI_STA);
     WiFi.hostname(deviceName);
@@ -243,6 +234,7 @@ bool connectToNetwork(){
     }
   }
   
+  bool res = false;
   if(WiFi.status() == WL_CONNECTED){
     Serial.println("");
     Serial.println("Connected");
@@ -253,7 +245,7 @@ bool connectToNetwork(){
     Serial.println("Can't connect");
     WiFi.disconnect();
     WiFi.mode(WIFI_AP);
-    res = WiFi.softAP("SMART_WINDOW");
+    res = WiFi.softAP(deviceName.isEmpty() ? "MY_SMART_WINDOW" : deviceName);
     Serial.print("Started ap with ip: ");
     Serial.println(WiFi.softAPIP());
     blink(1, 500);
@@ -270,119 +262,111 @@ void handleEncoder(){
     turnLeft(servo_left.read() - TURN_MANUAL_ANGLE);
     turnRight(servo_right.read() + TURN_MANUAL_ANGLE);
     autoTurn = false;
-    lastButton = millis();
+    lastButton = millis() + BUTTON_FROM_ENCODER_PAUSE;
   }else if(val < 0 ){
     turnLeft(servo_left.read() + TURN_MANUAL_ANGLE);
     turnRight(servo_right.read() - TURN_MANUAL_ANGLE);
     autoTurn = false;
-    lastButton = millis();
+    lastButton = millis() + BUTTON_FROM_ENCODER_PAUSE;
   }
 }
 
-void handleHomePage(){
-  if (server.arg(PARAM_OPEN) != "" && server.arg(PARAM_OPEN).length() < 8) {
-      openValue = server.arg(PARAM_OPEN).toInt();
-      writeToEEPROM(OPEN_VALUE_OFFSET, server.arg(PARAM_OPEN));
+bool consumeSmartHome(String json){
+  Serial.println(json);
+  StaticJsonDocument<512> parsedJson;
+  DeserializationError error = deserializeJson(parsedJson, json);
+  if(error){
+    Serial.println(error.f_str());
+    return false;
+  }
+
+  JsonArray arrayActions = parsedJson["actions"].as<JsonArray>();
+  for(int i = 0; i < arrayActions.size(); i++){
+    String action = arrayActions[i][PARAM_ACTION];
+    if(!action.equals(ACTION_SAVE_SETTINGS)){
+      if(!consumeAction(action, arrayActions[i][PARAM_VALUE]))
+        return false;
+    }else if(action.length() > 0){
+      if(!consumeSetting(arrayActions[i][PARAM_TYPE], arrayActions[i][PARAM_VALUE]))
+        return false;
+    }else{
+      break;
     }
-    if (server.arg(PARAM_CLOSE) != "" && server.arg(PARAM_CLOSE).length() < 8) {
-      closeValue = server.arg(PARAM_CLOSE).toInt();
-      writeToEEPROM(CLOSE_VALUE_OFFSET, server.arg(PARAM_CLOSE));
-    }
-    if (server.arg(PARAM_BRIGHT) != "" && server.arg(PARAM_BRIGHT).length() < 8) {
-      brightValue = server.arg(PARAM_BRIGHT).toInt();
-      writeToEEPROM(BRIGHT_VALUE_OFFSET, server.arg(PARAM_BRIGHT));
-    }
-    if (server.arg(PARAM_ANGLE) != "") {
-      int angle = server.arg(PARAM_ANGLE).toInt();
-      if(angle > 0){
-        autoTurn = false;
-        turnLeft(angle);
-        turnRight(180 - angle);
-      }
-    }
-    if (server.arg(PARAM_AUTO) != "") {
-      String val = server.arg(PARAM_AUTO);
-      if(val.equals("on")){
-        autoTurn = true;
-      }else if(val.equals("off")){
-        autoTurn = false;
-      }
-    }
-    if(server.arg(DEVICE_NAME_PARAM ) != ""){
-      String name = server.arg(DEVICE_NAME_PARAM);
-      if(name.length() <= 20 && !name.equals(WiFi.hostname())){
-        deviceName = name;
-        deviceName.toUpperCase();
-        writeToEEPROM(DEVICE_NAME_OFFSET, deviceName);
-        WiFi.hostname(deviceName);
-      }
-    }
-    if (server.arg(NETWORK_NAME_SET) != "" && server.arg(NETWORK_NAME_SET).length() < 20) {
-      networkName = server.arg(NETWORK_NAME_SET);
-      networkName.trim();
-      writeToEEPROM(NETWORK_NAME_OFFSET, server.arg(NETWORK_NAME_SET));
-    }
-    if (server.arg(NETWORK_PASSWORD_SET) != "" && server.arg(NETWORK_PASSWORD_SET).length() < 20) {
-      networkPassword = server.arg(NETWORK_PASSWORD_SET);
-      networkPassword.trim();
-      writeToEEPROM(NETWORK_PASSWORD_OFFSET, server.arg(NETWORK_PASSWORD_SET));
-    }
+  }
+  return true;
 }
 
-void handleOpenFullPage(){
-  autoTurn = false;
-  if (server.arg("servo") != "") {
-    String servName = server.arg("servo");
-    if(servName.equals("left")){
-      openFull(true, false);
-    }else if(servName.equals("right")){
-      openFull(false, true);
+
+bool consumeSetting(String paramType, String value){
+  Serial.print("Changing setting :: ");
+  Serial.print(paramType);
+  Serial.print("::");
+  Serial.println(value);
+  if(paramType.equals(PARAM_OPEN)){
+    openValue = value.toInt();
+    writeToEEPROM(OPEN_VALUE_OFFSET, value);
+  }else if(paramType.equals(PARAM_CLOSE)){
+    closeValue = value.toInt();
+    writeToEEPROM(CLOSE_VALUE_OFFSET, value);
+  }else if(paramType.equals(PARAM_BRIGHT)){
+    brightValue = value.toInt();
+    writeToEEPROM(BRIGHT_VALUE_OFFSET, value);
+  }else if(paramType.equals(PARAM_DEVICE_NAME)){
+    value.toUpperCase();
+    if(value.length() <= 20 && !value.equals(deviceName)){
+      deviceName = value;
+      writeToEEPROM(DEVICE_NAME_OFFSET, deviceName);
+      WiFi.hostname(deviceName);
+    }
+  }else if(paramType.equals(PARAM_NETWORK_NAME)){
+    value.trim();
+    if(value.length() <= 20 && !value.equals(networkName)){
+      networkName = value;
+      writeToEEPROM(NETWORK_NAME_OFFSET, value);
+    }
+  }else if(paramType.equals(PARAM_NETWORK_PASSWORD)){
+    value.trim();
+    if(value.length() <= 20 && !value.equals(networkPassword)){
+      networkPassword = value;
+      writeToEEPROM(NETWORK_PASSWORD_OFFSET, value);
     }
   }else{
-    openFull(true, true);
+    return false;
   }
+  return true;
 }
 
-void handleMiddlePage(){
-  autoTurn = false;
-  if (server.arg("servo") != "") {
-    String servName = server.arg("servo");
-    if(servName.equals("left")){
-      middle(true, false);
-    }else if(servName.equals("right")){
-      middle(false, true);
+bool consumeAction(String action, String value){
+  if(action.length() > 0){
+    Serial.print("Action :: ");
+    Serial.print(action);
+    Serial.print("::");
+    Serial.println(value);
+    if(action.equals(ACTION_AUTO_TURN)){
+      autoTurn = value.equals("on");
+      return true;
+    } else if(value.toInt() > 0 && value.toInt() < 4){
+      return servosAtion(action, value.toInt());
     }
-  }else{
-    middle(true, true);
   }
+  return false;
 }
 
-void handleClosePage(){
+bool servosAtion(String action, int servo){
   autoTurn = false;
-  if (server.arg("servo") != "") {
-    String servName = server.arg("servo");
-    if(servName.equals("left")){
-      close(true, false);
-    }else if(servName.equals("right")){
-      close(false, true);
-    }
+  if(action.equals(ACTION_OPEN_BRIGHT)){
+    openFull(servo);
+  }else if(action.equals(ACTION_OPEN)){
+    open(servo);
+  }else if(action.equals(ACTION_MIDDLE)){
+    middle(servo);
+  }else if(action.equals(ACTION_CLOSE)){
+    close(servo);
   }else{
-    close(true, true);
+    autoTurn = true;
+    return false;
   }
-}
-
-void handleOpenPage(){
-  autoTurn = false;
-  if (server.arg("servo") != "") {
-    String servName = server.arg("servo");
-    if(servName.equals("left")){
-      open(true, false);
-    }else if(servName.equals("right")){
-      open(false, true);
-    }
-  }else{
-    open(true, true);
-  }
+  return true;
 }
 
 void blink(int c, int pauseTime){
@@ -401,34 +385,74 @@ void turnRight(int d){
   if(servo_right.read() != d ) servo_right.write(d);
 }
 
-void openFull(boolean leftServ, boolean rightServ){
-  if(leftServ) turnLeft(BRIGHT_ANGLE);
-  if(rightServ) turnRight(180 - BRIGHT_ANGLE);
+void openFull(int servo){
+  switch(servo){
+    case 1:
+      turnLeft(BRIGHT_ANGLE);
+      break;
+    case 2:
+      turnRight(180 - BRIGHT_ANGLE);
+      break;
+    case 3:
+      turnLeft(BRIGHT_ANGLE);
+      turnRight(180 - BRIGHT_ANGLE);
+      break;
+  }
 }
 
-void open(boolean leftServ, boolean rightServ){
-  if(leftServ) turnLeft(OPEN_ANGLE);
-  if(rightServ) turnRight(180 - OPEN_ANGLE);
+void open(int servo){
+  switch(servo){
+    case 1:
+      turnLeft(OPEN_ANGLE);
+      break;
+    case 2:
+      turnRight(180 - OPEN_ANGLE);
+      break;
+    case 3:
+      turnLeft(OPEN_ANGLE);
+      turnRight(180 - OPEN_ANGLE);
+      break;
+  }
 }
 
-void middle(boolean leftServ, boolean rightServ){
-  if(leftServ) turnLeft(MIDDLE_ANGLE);
-  if(rightServ) turnRight(180 - MIDDLE_ANGLE);
+void middle(int servo){
+  switch(servo){
+    case 1:
+      turnLeft(MIDDLE_ANGLE);
+      break;
+    case 2:
+      turnRight(180 - MIDDLE_ANGLE);
+      break;
+    case 3:
+      turnLeft(MIDDLE_ANGLE);
+      turnRight(180 - MIDDLE_ANGLE);
+      break;
+  }
 }
 
-void close(boolean leftServ, boolean rightServ){
-  if(leftServ) turnLeft(CLOSE_ANGLE);
-  if(rightServ) turnRight(180 - CLOSE_ANGLE);
+void close(int servo){
+  switch(servo){
+    case 1:
+      turnLeft(CLOSE_ANGLE);
+      break;
+    case 2:
+      turnRight(180 - CLOSE_ANGLE);
+      break;
+    case 3:
+      turnLeft(CLOSE_ANGLE);
+      turnRight(180 - CLOSE_ANGLE);
+      break;
+  }
 }
 
 void autoTurnServo(){
   int lightVal = analogRead(LIGHT_PIN);
   if(lightVal < closeValue){
-    close(true, true);
+    close(3);
   }else if (lightVal > openValue){
     if(brightValue != 0 && brightValue > openValue){
       if(lightVal >= brightValue){
-        openFull(true, true);
+        openFull(3);
       }else{
         int angle = map(lightVal, openValue, brightValue, OPEN_ANGLE, BRIGHT_ANGLE);
         if(abs(180 - angle - servo_right.read()) > ANGLE_DIFFERENCE && abs(angle - servo_left.read()) > ANGLE_DIFFERENCE ){
@@ -437,7 +461,7 @@ void autoTurnServo(){
         }
       }
     }else{
-      open(true, true);
+      open(3);
     }
   }else{
     int angle = map(lightVal, closeValue, openValue, CLOSE_ANGLE, OPEN_ANGLE);
@@ -456,64 +480,65 @@ String mainWebPage(){
   }else{
     webPage += "<body class = \"picture\">";
   }
-  webPage += "<center><h1>Window :: ";
+  webPage += "<center><h1>Window";
+  webPage += deviceName.isEmpty() ?  "" : " :: ";
   webPage += deviceName;
   webPage += "</h1><p> left | right angle </p><p>";
   webPage += servo_left.read();
   webPage += " | ";
   webPage += servo_right.read();
   webPage += R"=====(</p><div class = "block">
-            <p>Open bright <a href="fullopen?servo=left"><button class = "smoove">Left</button></a><a href="fullopen?servo=right"><button class = "smoove">Right</button></a><a href="fullopen"><button class = "smoove">Both</button></a></p>
-            <p>Open <a href="open?servo=left"><button class = "smoove">Left</button></a><a href="open?servo=right"><button class = "smoove">Right</button></a><a href="open"><button class = "smoove">Both</button></a></p>
-            <p>Middle <a href="middle?servo=left"><button class = "smoove">Left</button></a><a href="middle?servo=right"><button class = "smoove">Right</button></a><a href="middle"><button class = "smoove">Both</button></a></p>
-            <p>Close <a href="close?servo=left"><button class = "smoove">Left</button></a><a href="close?servo=right"><button class = "smoove">Right</button></a><a href="close"><button class = "smoove">Both</button></a></p>
+            <p><p>Bright</p><a href="actions?action=action_bright&value=1"><button class = "smoove">Left</button></a><a href="actions?action=action_bright&value=2"><button class = "smoove">Right</button></a><a href="actions?action=action_bright&value=3"><button class = "smoove">Both</button></a></p>
+            <p><p>Open</p><a href="actions?action=action_open&value=1"><button class = "smoove">Left</button></a><a href="actions?action=action_open&value=2"><button class = "smoove">Right</button></a><a href="actions?action=action_open&value=3"><button class = "smoove">Both</button></a></p>
+            <p><p>Middle</p><a href="actions?action=action_middle&value=1"><button class = "smoove">Left</button></a><a href="actions?action=action_middle&value=2"><button class = "smoove">Right</button></a><a href="actions?action=action_middle&value=3"><button class = "smoove">Both</button></a></p>
+            <p><p>Close</p><a href="actions?action=action_close&value=1"><button class = "smoove">Left</button></a><a href="actions?action=action_close&value=2"><button class = "smoove">Right</button></a><a href="actions?action=action_close&value=3"><button class = "smoove">Both</button></a></p>
            </div>)=====";
   if (autoTurn) {
-    webPage += R"=====(<div class = "block"><p><font class = "ok">Auto turn is on </font></a>&nbsp;<a href="?auto_set=off"><button class = "alert">turn off</button></a></p>)=====";
+    webPage += R"=====(<div class = "block"><p><font class = "ok">Auto turn is on </font></a>&nbsp;<a href="actions?action=action_auto_turn&value=off"><button class = "alert">turn off</button></a></p>)=====";
   } else {
-    webPage += R"=====(<div class = "block"><p><font class = "alert">Auto turn is off </font></a>&nbsp;<a href="?auto_set=on"><button class = "ok">turn on</button></a></p>)=====";
+    webPage += R"=====(<div class = "block"><p><font class = "alert">Auto turn is off </font></a>&nbsp;<a href="actions?action=action_auto_turn&value=on"><button class = "ok">turn on</button></a></p>)=====";
   }
   webPage += "<p> Light analog value = ";
   webPage +=  analogRead(LIGHT_PIN);
-  webPage += "</p>";
-  webPage += "<p>bright/open/close values : ";
+  webPage += R"=====(</p>
+              <form action="/settings" ><p>Seted bright/open/close light values:</p>               
+                <p><input type="hidden" name="type" class = "smoove" value = "bright"></p>
+                <p>bright<input type="number" name="value" class = "smoove" value = ")=====";
   webPage += brightValue;
-  webPage += "/";
+  webPage += R"=====(" maxlength = "8"></p>
+                <p><input type="hidden" name="type" class = "smoove" value = "open"></p>
+                <p>open<input type="number" name="value" class = "smoove" value = ")=====";
   webPage += openValue;
-  webPage += "/";
+  webPage += R"=====(" maxlength = "8"></p>
+                <p><input type="hidden" name="type" class = "smoove" value = "close"></p>
+                <p>close<input type="number" name="value" class = "smoove" value = ")=====";
   webPage += closeValue;
-  webPage += R"=====(
-            <form action="/" >Set bright value (turns up if light >=): 
-              <input type="number" name="bright_set" class = "smoove" maxlength = "8">
-              <input type="submit" value="set" class = "smoove">
-            </form>
-            <form action="/">Set open value (open if light greater):
-               <input type="number" name="open_set" class = "smoove" maxlength = "8">
-                <input type="submit" value="set" class = "smoove">
+  webPage += R"=====(" maxlength = "8"></p>
+                <p><input type="submit" value="save" class = "smoove"></p>
               </form>
-            <form action="/" >Set close value (close if ligth less): 
-              <input type="number" name="close_set" class = "smoove" maxlength = "8">
-              <input type="submit" value="set" class = "smoove">
-            </form>
-            </div>)=====";
+              </div>)=====";
   webPage += R"=====(<div class = "block">
-            <form action="/">Set device name (it should contain only letters): 
-              <input type="text" name="device_name_set" class = "smoove" maxlength = "20" value = ")=====";
+              <form action="/settings">Set device name (it should contain only letters): 
+                <p><input type="hidden" name="type" class = "smoove" value = "device_name"></p>
+                <input type="text" name="value" class = "smoove" maxlength = "20" value = ")=====";
   webPage += deviceName;
   webPage += R"=====(">
-              <input type="submit" value="change" class = "smoove">
-            </form></div>)=====";
+                <input type="submit" value="save" class = "smoove">
+              </form></div>)=====";
   webPage += R"=====(<div class="block">
-            <form action="/">Connect to network with name:
-               <input type="name" name="network_name_set" class = "smoove" maxlength = "20" value = ")=====";
+              <form action="/settings">Connect to network with name/password:
+                 <p><input type="hidden" name="type" class = "smoove" value = "network_name"></p>
+                 <input type="name" name="value" class = "smoove" maxlength = "20" value = ")=====";
   webPage += networkName;
-  webPage += R"=====("><input type="name" name="network_password_set" class = "smoove" maxlength = "20"value = ")=====";
+  webPage += R"=====(">
+                <p><input type="hidden" name="type" class = "smoove" value = "network_password"></p>
+                <input type="name" name="value" class = "smoove" maxlength = "20"value = ")=====";
   webPage += networkPassword;
   webPage += R"=====("><p><input type="submit" value="save" class = "smoove"></p>
-              </form></div>)=====";
+                </form></div>)=====";
   webPage += R"=====(<p><a href="/restart"><button class = "alert">***RESTART***</button></a></p>)=====";
   webPage += "</center></body></html>";
-  return webPage;
+return webPage;
 }
 
 void handle_NotFound() {
@@ -521,31 +546,20 @@ void handle_NotFound() {
 }
 
 String buildJson() {
-  String json = "{\n\"servoLeft\":\"";
-  json += servo_left.read();
-  json += "\",\n\"servoRight\":\"";
-  json += servo_right.read();
-  json += "\",\n\"lightValue\":\"";
-  json += analogRead(LIGHT_PIN);
-  json += "\",\n\"closeValue\":\"";
-  json += closeValue;
-  json += "\",\n\"openValue\":\"";
-  json += openValue;
-  json += "\",\n\"brightValue\":\"";
-  json += brightValue;
-  json += "\",\n\"autoTurn\":\"";
-  if (autoTurn) {
-    json += "true";
-  } else {
-    json += "false";
-  }
-  json += "\"\n,\"name\":\"";
-  json += deviceName.startsWith("{w}") ? deviceName : "{w}" + deviceName;
-  json += "\"\n,\"networkName\":\"";
-  json += networkName;
-  json += "\",\"networkPassword\":\"";
-  json += networkPassword;
-  json += "\"}";
+  StaticJsonDocument<512> response;
+  response["servoLeft"]       = servo_left.read();
+  response["servoRight"]      = servo_right.read();
+  response["lightValue"]      = analogRead(LIGHT_PIN);
+  response["closeValue"]      = closeValue;
+  response["openValue"]       = openValue;
+  response["brightValue"]     = brightValue;
+  response["autoTurn"]        = autoTurn;
+  response["name"]            = deviceName.startsWith("{w}") ? deviceName : "{w}" + deviceName;
+  response["networkName"]     = networkName;
+  response["networkPassword"] = networkPassword;
+
+  String json;
+  serializeJsonPretty(response, json);
   return json;
 }
 

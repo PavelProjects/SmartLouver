@@ -7,58 +7,65 @@
 #include <ErriezRotaryFullStep.h>
 #include <ArduinoJson.h>
 
-#define PARAM_TYPE "type"
+#define DEFAULT_WIFI_NAME "MY_SMART_WINDOW"           //Дефолтное имя точки доступа
+
 #define PARAM_OPEN "open"
 #define PARAM_CLOSE "close"
 #define PARAM_BRIGHT "bright"
-#define PARAM_AUTO "auto_set"
+#define PARAM_AUTO "auto_set"                         //Названия параметров настроек
 #define PARAM_DEVICE_NAME "device_name"
 #define PARAM_NETWORK_NAME "network_name"
 #define PARAM_NETWORK_PASSWORD "network_password"
-#define PARAM_ACTION "action"
+
+#define PARAM_TYPE "type" 
+#define PARAM_ACTION "action"                       //Названия полей в json
 #define PARAM_VALUE "value"
 
-#define ACTION_OPEN_BRIGHT "action_bright"
-#define ACTION_OPEN "action_open"
-#define ACTION_CLOSE"action_close"
-#define ACTION_MIDDLE "action_middle"
-#define ACTION_AUTO_TURN "action_auto_turn"
-#define ACTION_SAVE_SETTINGS "action_save"
+                                                    //Названия действий:
+#define ACTION_OPEN_BRIGHT "action_bright"          //блокировать яркий свет
+#define ACTION_OPEN "action_open"                   //открыть
+#define ACTION_CLOSE"action_close"                  //закрыть
+#define ACTION_MIDDLE "action_middle"               //приоткрыть
+#define ACTION_AUTO_TURN "action_auto_turn"         //Включить или выключить автоматику
+#define ACTION_SAVE_SETTINGS "action_save"          //Сохарнить настройки
 
 #define PAUSE_TIME 250
-#define CONNECT_TRIES 10
-#define ANGLE_DIFFERENCE 10
+#define CONNECT_TRIES 10                            // Кол-во попыток подключения к сети wifi
+#define ANGLE_DIFFERENCE 10                         //Если разность угла сервы и угла, на который надо повернуть серву, больше этого значения, то сервопривод поворачивается. Используется при автоматическом повороте
+
 #define DEVICE_NAME_OFFSET 1
 #define OPEN_VALUE_OFFSET 21
-#define CLOSE_VALUE_OFFSET 31
+#define CLOSE_VALUE_OFFSET 31                       //Отступы для хранения значений в долговременной памяти
 #define BRIGHT_VALUE_OFFSET 41
 #define NETWORK_NAME_OFFSET 51
 #define NETWORK_PASSWORD_OFFSET 71
 
-#define OTA_PAUSE 500
-#define HANDLE_PAUSE 200
-#define AUTO_TURN_PAUSE 500
-#define BUTTON_FROM_ENCODER_PAUSE 200
+#define OTA_PAUSE 500                               //Задержка между вызовом функции для обновления прошивки по воздуху в цикле loop
+#define HANDLE_PAUSE 200                            //Задержка между вызовом функции для обработки клиента в цикле loop
+#define AUTO_TURN_PAUSE 500                         //Задержка между вызовом функции для автоматического пофорота в цикле loop
+#define BUTTON_FROM_ENCODER_PAUSE 200               //Задержка между обработкой нажатия кнопки энкодера
 
-#define BRIGHT_ANGLE 180
-#define OPEN_ANGLE 150
-#define CLOSE_ANGLE 5
-#define MIDDLE_ANGLE 90
-#define TURN_MANUAL_ANGLE 5
+                                                    //Для левого сервопривода угол берется как есть, для левого он вычитается из 180, тк правая серва зеркальна левой
+#define BRIGHT_ANGLE 180                            //Угол сервопривода, при котором будет блокироваться яркий свет
+#define OPEN_ANGLE 150                              //Угол сервопривода в открытом положении
+#define CLOSE_ANGLE 5                               //Угол сервопривода в закрытом положении
+#define MIDDLE_ANGLE 90                             //Угол сервопривода в среднем положении
+#define TURN_MANUAL_ANGLE 5                         //Угол поворота сервы в ручном режиме
 
-#define SERVO_LEFT_PIN 4
-#define SERVO_RIGHT_PIN 0
-#define LIGHT_PIN A0
-#define ENCODER_BUTTON 14
-#define ENCODER_PIN1 12
-#define ENCODER_PIN2 13
+#define SERVO_LEFT_PIN 4                            //Пин подключения левого сервопривода
+#define SERVO_RIGHT_PIN 0                           //Пин подключения правого сервопривода
+#define LIGHT_PIN A0                                //Пин подключения фоторезистора
+#define ENCODER_BUTTON 14                           //Пин подключения кнопки энкодера
+#define ENCODER_PIN1 12                             //Пин подключения sw пина энкодера
+#define ENCODER_PIN2 13                             //Пин подключения dt пина энкодера
 
-#define START_AP 1
+#define START_AP 1                                  //Включать ли режим точки доступа, при потере сигнала wifi
 
 Servo servo_right, servo_left;
 ESP8266WebServer server(3257);
 RotaryFullStep rotary(ENCODER_PIN1, ENCODER_PIN2);
 
+                                                    //Заголовок страницы с css стилями
 String pageStart = R"=====(<style>
           .picture{
              background: url(https://sun9-1.userapi.com/impg/hEAhUJ9G4XJuhY-OgqdDZWu8lZrw_7Re6v0kvA/y_lJSGTiOdE.jpg?size=2560x1640&quality=96&sign=f700f032283a93104c625cc76930362f&type=album); background-repeat: no-repeat; background-size: auto;
@@ -102,6 +109,8 @@ String pageStart = R"=====(<style>
   </head>
 )====="; 
 
+String lastJson = "";
+
 boolean autoTurn = true;
 int openValue, closeValue, brightValue;
 String networkName, networkPassword, deviceName;
@@ -141,14 +150,15 @@ void setup(void){
   });
 
   server.on("/json", [](){
-    server.send(200, "text/html", buildJson());
+    server.send(200, "text/html", buildJson(true));
   });
   
   server.on("/smarthome", [](){
     if(server.hasArg("plain")){
-      server.send (consumeSmartHome(server.arg("plain")) ? 200 : 500, "application/json",  buildJson());
+      bool res = consumeSmartHome(server.arg("plain"));
+      server.send ( res ? 200 : 500, "application/json",  buildJson(res));
     }else{
-      server.send (400, "application/json",  buildJson());
+      server.send (400, "application/json",  buildJson(false));
     } 
   });
   
@@ -156,6 +166,10 @@ void setup(void){
     consumeAction(server.arg(PARAM_ACTION), server.arg(PARAM_VALUE));
     server.sendHeader("Location", String("/"), true);
     server.send ( 302, "text/html", "");
+  });
+
+  server.on("/lastjson", [](){
+      server.send (200, "application/json", lastJson);
   });
   
   server.on("/settings", [](){
@@ -218,6 +232,7 @@ bool connectToNetwork(){
   }
 
   if(!networkName.isEmpty()){
+    Serial.println();
     int c = 0;
     WiFi.mode(WIFI_STA);
     WiFi.hostname(deviceName);
@@ -226,6 +241,8 @@ bool connectToNetwork(){
     Serial.print(networkName);
     Serial.print(" with password ");
     Serial.println(networkPassword);
+    Serial.print("Device name:");
+    Serial.println(deviceName);
     while (c < CONNECT_TRIES && WiFi.status() != WL_CONNECTED) {
       Serial.print(".");
       c++;
@@ -245,7 +262,7 @@ bool connectToNetwork(){
     Serial.println("Can't connect");
     WiFi.disconnect();
     WiFi.mode(WIFI_AP);
-    res = WiFi.softAP(deviceName.isEmpty() ? "MY_SMART_WINDOW" : deviceName);
+    res = WiFi.softAP(deviceName.isEmpty() ? DEFAULT_WIFI_NAME : deviceName);
     Serial.print("Started ap with ip: ");
     Serial.println(WiFi.softAPIP());
     blink(1, 500);
@@ -272,26 +289,22 @@ void handleEncoder(){
 }
 
 bool consumeSmartHome(String json){
+  lastJson = json;
   Serial.println(json);
-  StaticJsonDocument<512> parsedJson;
+  StaticJsonDocument<1600> parsedJson;
   DeserializationError error = deserializeJson(parsedJson, json);
   if(error){
     Serial.println(error.f_str());
+    blink(1, 250);
     return false;
   }
 
-  JsonArray arrayActions = parsedJson["actions"].as<JsonArray>();
-  for(int i = 0; i < arrayActions.size(); i++){
-    String action = arrayActions[i][PARAM_ACTION];
-    if(!action.equals(ACTION_SAVE_SETTINGS)){
-      if(!consumeAction(action, arrayActions[i][PARAM_VALUE]))
-        return false;
-    }else if(action.length() > 0){
-      if(!consumeSetting(arrayActions[i][PARAM_TYPE], arrayActions[i][PARAM_VALUE]))
-        return false;
-    }else{
-      break;
-    }
+  String action = parsedJson[PARAM_ACTION];
+  if(!action.equals(ACTION_SAVE_SETTINGS)){
+    if(!consumeAction(action, parsedJson[PARAM_VALUE]))
+      return false;
+  }else if(action.length() > 0){
+    return consumeSetting(parsedJson[PARAM_TYPE], parsedJson[PARAM_VALUE]);
   }
   return true;
 }
@@ -532,7 +545,7 @@ String mainWebPage(){
   webPage += networkName;
   webPage += R"=====(">
                 <p><input type="hidden" name="type" class = "smoove" value = "network_password"></p>
-                <input type="name" name="value" class = "smoove" maxlength = "20"value = ")=====";
+                <input type="password" name="value" class = "smoove" maxlength = "20"value = ")=====";
   webPage += networkPassword;
   webPage += R"=====("><p><input type="submit" value="save" class = "smoove"></p>
                 </form></div>)=====";
@@ -545,7 +558,7 @@ void handle_NotFound() {
   server.send(404, "text/html", "<html><body><center><p><h2>404</h2></p><p><h1>B R U H</h1></p></center></body></html>");
 }
 
-String buildJson() {
+String buildJson(bool res) {
   StaticJsonDocument<512> response;
   response["servoLeft"]       = servo_left.read();
   response["servoRight"]      = servo_right.read();
@@ -554,9 +567,10 @@ String buildJson() {
   response["openValue"]       = openValue;
   response["brightValue"]     = brightValue;
   response["autoTurn"]        = autoTurn;
-  response["name"]            = deviceName.startsWith("{w}") ? deviceName : "{w}" + deviceName;
+  response["name"]            = deviceName;
   response["networkName"]     = networkName;
   response["networkPassword"] = networkPassword;
+  response["result"]          = res;
 
   String json;
   serializeJsonPretty(response, json);

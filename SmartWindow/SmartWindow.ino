@@ -7,12 +7,11 @@
 #include <ErriezRotaryFullStep.h>
 #include <ArduinoJson.h>
 
-#define DEFAULT_WIFI_NAME "MY_SMART_WINDOW"           //Дефолтное имя точки доступа
+#define DEFAULT_NAME "MY_SMART_WINDOW"           //Дефолтное имя
 
 #define PARAM_OPEN "open"
 #define PARAM_CLOSE "close"
-#define PARAM_BRIGHT "bright"
-#define PARAM_AUTO "auto_set"                         //Названия параметров настроек
+#define PARAM_BRIGHT "bright"                       //Названия параметров настроек
 #define PARAM_DEVICE_NAME "device_name"
 #define PARAM_NETWORK_NAME "network_name"
 #define PARAM_NETWORK_PASSWORD "network_password"
@@ -66,7 +65,7 @@ ESP8266WebServer server(3257);
 RotaryFullStep rotary(ENCODER_PIN1, ENCODER_PIN2);
 
                                                     //Заголовок страницы с css стилями
-String pageStart = R"=====(<style>
+const String pageStart = R"=====(<style>
           .picture{
              background: url(https://sun9-1.userapi.com/impg/hEAhUJ9G4XJuhY-OgqdDZWu8lZrw_7Re6v0kvA/y_lJSGTiOdE.jpg?size=2560x1640&quality=96&sign=f700f032283a93104c625cc76930362f&type=album); background-repeat: no-repeat; background-size: auto;
           }
@@ -129,6 +128,7 @@ void setup(void){
   brightValue = brightValue == 0 ? 1024 : brightValue;
   deviceName = readFromEEPROM(DEVICE_NAME_OFFSET);
   deviceName.trim();
+  deviceName = deviceName.isEmpty() ? DEFAULT_NAME : deviceName;
 
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN1), handleEncoder, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN2), handleEncoder, CHANGE);
@@ -191,8 +191,6 @@ void setup(void){
   server.onNotFound(handle_NotFound);
   server.begin();
   Serial.println("HTTP server started");
-  
-  ArduinoOTA.begin();
 }
 
 long lastOta, lastHandle, lastAuto, lastButton;
@@ -225,12 +223,6 @@ void loop(void){
 }
 
 bool connectToNetwork(){
-  if(WiFi.getMode() == WIFI_AP){
-    WiFi.softAPdisconnect (true);
-  }else{
-    WiFi.disconnect();  
-  }
-
   if(!networkName.isEmpty()){
     Serial.println();
     int c = 0;
@@ -262,11 +254,13 @@ bool connectToNetwork(){
     Serial.println("Can't connect");
     WiFi.disconnect();
     WiFi.mode(WIFI_AP);
-    res = WiFi.softAP(deviceName.isEmpty() ? DEFAULT_WIFI_NAME : deviceName);
+    res = WiFi.softAP(deviceName);
     Serial.print("Started ap with ip: ");
     Serial.println(WiFi.softAPIP());
+    
     blink(1, 500);
   }
+  ArduinoOTA.begin();
   return res;
 }
 
@@ -290,21 +284,24 @@ void handleEncoder(){
 
 bool consumeSmartHome(String json){
   lastJson = json;
-  Serial.println(json);
-  StaticJsonDocument<1600> parsedJson;
+  StaticJsonDocument<1000> parsedJson;
   DeserializationError error = deserializeJson(parsedJson, json);
   if(error){
     Serial.println(error.f_str());
     blink(1, 250);
     return false;
   }
-
-  String action = parsedJson[PARAM_ACTION];
-  if(!action.equals(ACTION_SAVE_SETTINGS)){
-    if(!consumeAction(action, parsedJson[PARAM_VALUE]))
-      return false;
-  }else if(action.length() > 0){
-    return consumeSetting(parsedJson[PARAM_TYPE], parsedJson[PARAM_VALUE]);
+  JsonArray actions = parsedJson.as<JsonArray>();
+  Serial.println("------------Received json------------");
+  serializeJsonPretty(actions, Serial);
+  for(JsonVariant act : actions){
+    if(act[PARAM_ACTION] == ACTION_SAVE_SETTINGS){
+      if(!consumeSetting(act[PARAM_TYPE], act[PARAM_VALUE]))
+        return false;
+    }else if(sizeof(act[PARAM_ACTION]) > 0){
+      if(!consumeAction(act[PARAM_ACTION], act[PARAM_VALUE]))
+        return false;
+    }  
   }
   return true;
 }
@@ -344,6 +341,7 @@ bool consumeSetting(String paramType, String value){
       writeToEEPROM(NETWORK_PASSWORD_OFFSET, value);
     }
   }else{
+    blink(1, 100);
     return false;
   }
   return true;
@@ -362,6 +360,7 @@ bool consumeAction(String action, String value){
       return servosAtion(action, value.toInt());
     }
   }
+  blink(1, 100);
   return false;
 }
 
@@ -560,6 +559,7 @@ void handle_NotFound() {
 
 String buildJson(bool res) {
   StaticJsonDocument<512> response;
+  response["type"]            = "{w}";
   response["servoLeft"]       = servo_left.read();
   response["servoRight"]      = servo_right.read();
   response["lightValue"]      = analogRead(LIGHT_PIN);
@@ -574,6 +574,8 @@ String buildJson(bool res) {
 
   String json;
   serializeJsonPretty(response, json);
+  Serial.println("------------Sending json------------");
+  Serial.println(json);
   return json;
 }
 

@@ -30,7 +30,7 @@
 
 #define PAUSE_TIME 250
 #define CONNECT_TRIES 10                            // Кол-во попыток подключения к сети wifi
-#define ANGLE_DIFFERENCE 10                         //Если разность угла сервы и угла, на который надо повернуть серву, больше этого значения, то сервопривод поворачивается. Используется при автоматическом повороте
+#define ANGLE_DIFFERENCE 30                         //Если разность угла сервы и угла, на который надо повернуть серву, больше этого значения, то сервопривод поворачивается. Используется при автоматическом повороте
 
 #define DEVICE_NAME_OFFSET 1
 #define OPEN_VALUE_OFFSET 21
@@ -61,7 +61,7 @@
 #define START_AP 1                                  //Включать ли режим точки доступа, при потере сигнала wifi
 
 Servo servo_right, servo_left;
-ESP8266WebServer server(3257);
+ESP8266WebServer server(3257), server_http(80);
 RotaryFullStep rotary(ENCODER_PIN1, ENCODER_PIN2);
 
                                                     //Заголовок страницы с css стилями
@@ -145,8 +145,8 @@ void setup(void){
     }
   }
 
-  server.on("/", [](){
-    server.send(200, "text/html", mainWebPage());
+  server_http.on("/", [](){
+    server_http.send(200, "text/html", mainWebPage());
   });
 
   server.on("/json", [](){
@@ -162,34 +162,35 @@ void setup(void){
     } 
   });
   
-  server.on("/actions", [](){
+  server_http.on("/actions", [](){
     consumeAction(server.arg(PARAM_ACTION), server.arg(PARAM_VALUE));
-    server.sendHeader("Location", String("/"), true);
-    server.send ( 302, "text/html", "");
+    server_http.sendHeader("Location", String("/"), true);
+    server_http.send ( 302, "text/html", "");
   });
 
   server.on("/lastjson", [](){
       server.send (200, "application/json", lastJson);
   });
   
-  server.on("/settings", [](){
+  server_http.on("/settings", [](){
     for(int i = 0; i < server.args() - 1; i += 2){
       consumeSetting(server.arg(i), server.arg(i+1));
     }
-    server.sendHeader("Location", String("/"), true);
-    server.send ( 302, "text/html", "");
+    server_http.sendHeader("Location", String("/"), true);
+    server_http.send ( 302, "text/html", "");
   });
   
   server.on("/light", [](){
     server.send(200, "text/html", String(analogRead(LIGHT_PIN)));  
   });
   
-  server.on("/restart", [](){
+  server_http.on("/restart", [](){
     ESP.restart();
   });
   
-  server.onNotFound(handle_NotFound);
+  server_http.onNotFound(handle_NotFound);
   server.begin();
+  server_http.begin();
   Serial.println("HTTP server started");
 }
 
@@ -204,6 +205,7 @@ void loop(void){
   if(millis() - lastHandle > HANDLE_PAUSE){
     if(WiFi.status() == WL_CONNECTED || WiFi.getMode() == WIFI_AP){
       server.handleClient();
+      server_http.handleClient();
       lastHandle = millis();  
     }else if (START_AP){
       connectToNetwork();
@@ -283,7 +285,6 @@ void handleEncoder(){
 }
 
 bool consumeSmartHome(String json){
-  lastJson = json;
   StaticJsonDocument<1000> parsedJson;
   DeserializationError error = deserializeJson(parsedJson, json);
   if(error){
@@ -292,8 +293,7 @@ bool consumeSmartHome(String json){
     return false;
   }
   JsonArray actions = parsedJson.as<JsonArray>();
-  Serial.println("------------Received json------------");
-  serializeJsonPretty(actions, Serial);
+  serializeJsonPretty(actions, lastJson);
   for(JsonVariant act : actions){
     if(act[PARAM_ACTION] == ACTION_SAVE_SETTINGS){
       if(!consumeSetting(act[PARAM_TYPE], act[PARAM_VALUE]))
@@ -554,7 +554,7 @@ return webPage;
 }
 
 void handle_NotFound() {
-  server.send(404, "text/html", "<html><body><center><p><h2>404</h2></p><p><h1>B R U H</h1></p></center></body></html>");
+  server_http.send(404, "text/html", "<html><body><center><p><h2>404</h2></p><p><h1>B R U H</h1></p></center></body></html>");
 }
 
 String buildJson(bool res) {

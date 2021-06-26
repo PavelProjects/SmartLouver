@@ -30,7 +30,7 @@
 
 #define PAUSE_TIME 250
 #define CONNECT_TRIES 10                            // Кол-во попыток подключения к сети wifi
-#define ANGLE_DIFFERENCE 30                         //Если разность угла сервы и угла, на который надо повернуть серву, больше этого значения, то сервопривод поворачивается. Используется при автоматическом повороте
+#define ANGLE_DIFFERENCE 20                         //Если разность угла сервы и угла, на который надо повернуть серву, больше этого значения, то сервопривод поворачивается. Используется при автоматическом повороте
 
 #define DEVICE_NAME_OFFSET 1
 #define OPEN_VALUE_OFFSET 21
@@ -58,7 +58,7 @@
 #define ENCODER_PIN1 12                             //Пин подключения sw пина энкодера
 #define ENCODER_PIN2 13                             //Пин подключения dt пина энкодера
 
-#define START_AP 1                                  //Включать ли режим точки доступа, при потере сигнала wifi
+#define START_AP 0                                  //Включать ли режим точки доступа, при потере сигнала wifi
 
 Servo servo_right, servo_left;
 ESP8266WebServer server(3257), server_http(80);
@@ -104,7 +104,6 @@ const String pageStart = R"=====(<style>
     <meta charset='utf-8'>
     <meta http-equiv='refresh' content='60'>
     <title>Window controller</title>
-    <link rel='icon' href='https://psv4.userapi.com/c856428/u291961412/docs/d11/c98618fcbc08/clap.gif' type="image/gif">
   </head>
 )====="; 
 
@@ -163,7 +162,7 @@ void setup(void){
   });
   
   server_http.on("/actions", [](){
-    consumeAction(server.arg(PARAM_ACTION), server.arg(PARAM_VALUE));
+    consumeAction(server_http.arg(PARAM_ACTION), server_http.arg(PARAM_VALUE));
     server_http.sendHeader("Location", String("/"), true);
     server_http.send ( 302, "text/html", "");
   });
@@ -173,10 +172,10 @@ void setup(void){
   });
   
   server_http.on("/settings", [](){
-    for(int i = 0; i < server.args() - 1; i += 2){
-      consumeSetting(server.arg(i), server.arg(i+1));
+    for(int i = 0; i < server_http.args() - 1; i += 2){
+      consumeSetting(server_http.arg(i), server_http.arg(i+1));
     }
-    server_http.sendHeader("Location", String("/"), true);
+    server_http.sendHeader("Location", String("/"), true);;  
     server_http.send ( 302, "text/html", "");
   });
   
@@ -231,7 +230,7 @@ bool connectToNetwork(){
     WiFi.mode(WIFI_STA);
     WiFi.hostname(deviceName);
     WiFi.begin(networkName, networkPassword);
-    Serial.print("Connecting to ");
+    Serial.println("Connecting to ");
     Serial.print(networkName);
     Serial.print(" with password ");
     Serial.println(networkPassword);
@@ -513,7 +512,7 @@ String mainWebPage(){
   webPage += "<p> Light analog value = ";
   webPage +=  analogRead(LIGHT_PIN);
   webPage += R"=====(</p>
-              <form action="/settings" ><p>Seted bright/open/close light values:</p>               
+              <form action="settings"><p>Bright/open/close light values:</p>               
                 <p><input type="hidden" name="type" class = "smoove" value = "bright"></p>
                 <p>bright<input type="number" name="value" class = "smoove" value = ")=====";
   webPage += brightValue;
@@ -530,7 +529,7 @@ String mainWebPage(){
               </form>
               </div>)=====";
   webPage += R"=====(<div class = "block">
-              <form action="/settings">Set device name (it should contain only letters): 
+              <form action="settings">Set device name (it should contain only letters): 
                 <p><input type="hidden" name="type" class = "smoove" value = "device_name"></p>
                 <input type="text" name="value" class = "smoove" maxlength = "20" value = ")=====";
   webPage += deviceName;
@@ -538,7 +537,7 @@ String mainWebPage(){
                 <input type="submit" value="save" class = "smoove">
               </form></div>)=====";
   webPage += R"=====(<div class="block">
-              <form action="/settings">Connect to network with name/password:
+              <form action="settings">Connect to network with name/password:
                  <p><input type="hidden" name="type" class = "smoove" value = "network_name"></p>
                  <input type="name" name="value" class = "smoove" maxlength = "20" value = ")=====";
   webPage += networkName;

@@ -58,7 +58,7 @@
 #define ENCODER_PIN1 12                             //Пин подключения sw пина энкодера
 #define ENCODER_PIN2 13                             //Пин подключения dt пина энкодера
 
-#define START_AP 0                                  //Включать ли режим точки доступа, при потере сигнала wifi
+#define START_AP 1                                  //Включать ли режим точки доступа, при потере сигнала wifi
 
 Servo servo_right, servo_left;
 ESP8266WebServer server(3257), server_http(80);
@@ -98,6 +98,14 @@ const String pageStart = R"=====(<style>
              border: 1px solid #eb1010;
              background-color: green;
           }
+          .error_message {
+            color: red;
+            text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+          }
+          .done_message {
+            color: green;
+            text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+          }
       </style>
   <head>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'/>
@@ -111,7 +119,7 @@ String lastJson = "";
 
 boolean autoTurn = true;
 int openValue, closeValue, brightValue;
-String networkName, networkPassword, deviceName;
+String networkName, networkPassword, deviceName, actionResult = "";
 
 void setup(void){
   Serial.begin(115200);
@@ -162,7 +170,7 @@ void setup(void){
   });
   
   server_http.on("/actions", [](){
-    consumeAction(server_http.arg(PARAM_ACTION), server_http.arg(PARAM_VALUE));
+    actionResult = consumeAction(server_http.arg(PARAM_ACTION), server_http.arg(PARAM_VALUE)) ? "<div class=\"done_message\">Done</div>" : "<div class=\"error_message\">Something gone wrong</div>";
     server_http.sendHeader("Location", String("/"), true);
     server_http.send ( 302, "text/html", "");
   });
@@ -172,9 +180,11 @@ void setup(void){
   });
   
   server_http.on("/settings", [](){
+    bool res = true;
     for(int i = 0; i < server_http.args() - 1; i += 2){
-      consumeSetting(server_http.arg(i), server_http.arg(i+1));
+      res = res && consumeSetting(server_http.arg(i), server_http.arg(i+1));
     }
+    actionResult = res ? "<div class=\"done_message\">Saved</div>" : "<div class=\"error_message\">Something gone wrong</div>";
     server_http.sendHeader("Location", String("/"), true);;  
     server_http.send ( 302, "text/html", "");
   });
@@ -494,11 +504,15 @@ String mainWebPage(){
   webPage += "<center><h1>Window";
   webPage += deviceName.isEmpty() ?  "" : " :: ";
   webPage += deviceName;
-  webPage += "</h1><p> left | right angle </p><p>";
-  webPage += servo_left.read();
-  webPage += " | ";
-  webPage += servo_right.read();
-  webPage += R"=====(</p><div class = "block">
+  webPage += "</h1><p>";
+  webPage += actionResult;
+  webPage += "</p>";
+//  webPaeg += "<p> left | right angle </p><p>";
+//  webPage += servo_left.read();
+//  webPage += " | ";
+//  webPage += servo_right.read();
+//  webPage += "</p>";
+  webPage += R"=====(<div class = "block">
             <p><p>Bright</p><a href="actions?action=action_bright&value=1"><button class = "smoove">Left</button></a><a href="actions?action=action_bright&value=2"><button class = "smoove">Right</button></a><a href="actions?action=action_bright&value=3"><button class = "smoove">Both</button></a></p>
             <p><p>Open</p><a href="actions?action=action_open&value=1"><button class = "smoove">Left</button></a><a href="actions?action=action_open&value=2"><button class = "smoove">Right</button></a><a href="actions?action=action_open&value=3"><button class = "smoove">Both</button></a></p>
             <p><p>Middle</p><a href="actions?action=action_middle&value=1"><button class = "smoove">Left</button></a><a href="actions?action=action_middle&value=2"><button class = "smoove">Right</button></a><a href="actions?action=action_middle&value=3"><button class = "smoove">Both</button></a></p>

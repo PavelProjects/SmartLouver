@@ -6,16 +6,18 @@
 #include <ArduinoJson.h>
 #include <ErriezRotaryFullStep.h>
 
-#define DEFAULT_NAME "MY_SMART_LOUVER"           //Дефолтное имя
+#define DEFAULT_NAME "MY_SMART_LOUVER"              //Дефолтное имя
+                                                    //Названия параметров настроек для json
+                                                    //Значения фоторезистора, при котором жалюзи будут:
+#define PARAM_OPEN "open"                           //Открыты
+#define PARAM_CLOSE "close"                         //Закрыты
+#define PARAM_BRIGHT "bright"                       //Блокировать яркий свет
 
-#define PARAM_OPEN "open"
-#define PARAM_CLOSE "close"
-#define PARAM_BRIGHT "bright"                       //Названия параметров настроек
-#define PARAM_DEVICE_NAME "device_name"
-#define PARAM_NETWORK_NAME "network_name"
-#define PARAM_NETWORK_PASSWORD "network_password"
+#define PARAM_DEVICE_NAME "device_name"             //Название устройства
+#define PARAM_NETWORK_NAME "network_name"           //Название wifi
+#define PARAM_NETWORK_PASSWORD "network_password"   //Пароль wifi
 
-#define PARAM_TYPE "type" 
+#define PARAM_TYPE "setting" 
 #define PARAM_ACTION "action"                       //Названия полей в json
 #define PARAM_VALUE "value"
 
@@ -526,15 +528,15 @@ String mainWebPage(){
   webPage +=  analogRead(LIGHT_PIN);
   webPage += R"=====(</p>
               <form action="settings"><p>Bright/open/close light values:</p>               
-                <p><input type="hidden" name="type" class = "smoove" value = "bright"></p>
+                <p><input type="hidden" name="setting" class = "smoove" value = "bright"></p>
                 <p>bright<input type="number" name="value" class = "smoove" value = ")=====";
   webPage += brightValue;
   webPage += R"=====(" maxlength = "8"></p>
-                <p><input type="hidden" name="type" class = "smoove" value = "open"></p>
+                <p><input type="hidden" name="setting" class = "smoove" value = "open"></p>
                 <p>open<input type="number" name="value" class = "smoove" value = ")=====";
   webPage += openValue;
   webPage += R"=====(" maxlength = "8"></p>
-                <p><input type="hidden" name="type" class = "smoove" value = "close"></p>
+                <p><input type="hidden" name="setting" class = "smoove" value = "close"></p>
                 <p>close<input type="number" name="value" class = "smoove" value = ")=====";
   webPage += closeValue;
   webPage += R"=====(" maxlength = "8"></p>
@@ -543,7 +545,7 @@ String mainWebPage(){
               </div>)=====";
   webPage += R"=====(<div class = "block">
               <form action="settings">Set device name (it should contain only letters): 
-                <p><input type="hidden" name="type" class = "smoove" value = "device_name"></p>
+                <p><input type="hidden" name="setting" class = "smoove" value = "device_name"></p>
                 <input type="text" name="value" class = "smoove" maxlength = "20" value = ")=====";
   webPage += deviceName;
   webPage += R"=====(">
@@ -551,11 +553,11 @@ String mainWebPage(){
               </form></div>)=====";
   webPage += R"=====(<div class="block">
               <form action="settings">Connect to network with name/password:
-                 <p><input type="hidden" name="type" class = "smoove" value = "network_name"></p>
+                 <p><input type="hidden" name="setting" class = "smoove" value = "network_name"></p>
                  <input type="name" name="value" class = "smoove" maxlength = "20" value = ")=====";
   webPage += networkName;
   webPage += R"=====(">
-                <p><input type="hidden" name="type" class = "smoove" value = "network_password"></p>
+                <p><input type="hidden" name="setting" class = "smoove" value = "network_password"></p>
                 <input type="password" name="value" class = "smoove" maxlength = "20"value = ")=====";
   webPage += networkPassword;
   webPage += R"=====("><p><input type="submit" value="save" class = "smoove"></p>

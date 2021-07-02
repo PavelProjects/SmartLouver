@@ -12,7 +12,6 @@
 #define PARAM_OPEN "open"                           //Открыты
 #define PARAM_CLOSE "close"                         //Закрыты
 #define PARAM_BRIGHT "bright"                       //Блокировать яркий свет
-
 #define PARAM_DEVICE_NAME "device_name"             //Название устройства
 #define PARAM_NETWORK_NAME "network_name"           //Название wifi
 #define PARAM_NETWORK_PASSWORD "network_password"   //Пароль wifi

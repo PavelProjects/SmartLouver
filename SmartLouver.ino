@@ -110,7 +110,7 @@ const String pageStart = R"=====(<style>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'/>
     <meta charset='utf-8'>
     <meta http-equiv='refresh' content='60'>
-    <title>Window controller</title>
+    <title>Louver controller</title>
   </head>
 )====="; 
 

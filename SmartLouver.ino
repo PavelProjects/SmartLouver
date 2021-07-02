@@ -4,6 +4,7 @@
 #include <ArduinoOTA.h>
 #include <EEPROM.h>
 #include <ArduinoJson.h>
+#include <ErriezRotaryFullStep.h>
 
 #define DEFAULT_NAME "MY_SMART_LOUVER"           //Дефолтное имя
 

@@ -5,7 +5,7 @@
 #include <EEPROM.h>
 #include <ArduinoJson.h>
 
-#define DEFAULT_NAME "MY_SMART_WINDOW"           //Дефолтное имя
+#define DEFAULT_NAME "MY_SMART_LOUVER"           //Дефолтное имя
 
 #define PARAM_OPEN "open"
 #define PARAM_CLOSE "close"

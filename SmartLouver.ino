@@ -5,14 +5,15 @@
 #include <EEPROM.h>
 #include <ArduinoJson.h>
 #include <ErriezRotaryFullStep.h>
+#include "DHT.h"
 
 #define DEFAULT_NAME "MY_SMART_LOUVER"              //Дефолтное имя
+
                                                     //Названия параметров настроек для json
                                                     //Значения фоторезистора, при котором жалюзи будут:
 #define PARAM_OPEN "open"                           //Открыты
 #define PARAM_CLOSE "close"                         //Закрыты
 #define PARAM_BRIGHT "bright"                       //Блокировать яркий свет
-
 #define PARAM_DEVICE_NAME "device_name"             //Название устройства
 #define PARAM_NETWORK_NAME "network_name"           //Название wifi
 #define PARAM_NETWORK_PASSWORD "network_password"   //Пароль wifi
@@ -58,13 +59,16 @@
 #define ENCODER_BUTTON 14                           //Пин подключения кнопки энкодера
 #define ENCODER_PIN1 13                             //Пин подключения sw пина энкодера
 #define ENCODER_PIN2 12                             //Пин подключения dt пина энкодера
+#define DHTPIN 5                                    //Пин подключения сенсора dht
+
+#define DHT_TYPE "DHT11"                            //Модель сенсора dht
 
 #define START_AP 1                                  //Включать ли режим точки доступа, при потере сигнала wifi
 
 Servo servo_right, servo_left;
 ESP8266WebServer server(3257), server_http(80);
 RotaryFullStep rotary(ENCODER_PIN1, ENCODER_PIN2);
-
+DHT dht(DHTPIN, DHT11);
                                                     //Заголовок страницы с css стилями
 const String pageStart = R"=====(<style>
           .picture{
@@ -146,6 +150,8 @@ void setup(void){
    
   servo_right.attach(SERVO_RIGHT_PIN);
   servo_left.attach(SERVO_LEFT_PIN);
+
+  dht.begin();
 
   if(!connectToNetwork()){
     while(true){
@@ -586,6 +592,8 @@ String buildJson(bool res) {
   response["networkName"]     = networkName;
   response["networkPassword"] = networkPassword;
   response["result"]          = res;
+  response["humidity"]        = dht.readHumidity();
+  response["temp"]            = dht.readTemperature();
 
   String json;
   serializeJsonPretty(response, json);
